@@ -215,4 +215,50 @@ describe('ConfigurationService', () => {
   });
 });
 
+describe('ConfigurationService — Audiobookshelf library IDs (multi-library)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const mockConfig = (values: Record<string, string>) => {
+    prismaMock.configuration.findUnique.mockImplementation((args: { where: { key: string } }) => {
+      const key = args.where.key;
+      return Promise.resolve(
+        key in values ? { key, value: values[key], encrypted: false } : null
+      );
+    });
+  };
+
+  it('returns the multi-library list when audiobookshelf.library_ids is set', async () => {
+    mockConfig({ 'audiobookshelf.library_ids': JSON.stringify(['en-id', 'de-id', 'kids-id']) });
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const ids = await new ConfigurationService().getAudiobookshelfLibraryIds();
+    expect(ids).toEqual(['en-id', 'de-id', 'kids-id']);
+  });
+
+  it('falls back to the legacy single library_id for back-compat', async () => {
+    mockConfig({ 'audiobookshelf.library_id': 'legacy-en-id' });
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const ids = await new ConfigurationService().getAudiobookshelfLibraryIds();
+    expect(ids).toEqual(['legacy-en-id']);
+  });
+
+  it('returns an empty array when neither key is configured', async () => {
+    mockConfig({});
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const ids = await new ConfigurationService().getAudiobookshelfLibraryIds();
+    expect(ids).toEqual([]);
+  });
+
+  it('falls back to the legacy id when the list value is malformed JSON', async () => {
+    mockConfig({
+      'audiobookshelf.library_ids': 'not-json',
+      'audiobookshelf.library_id': 'legacy-en-id',
+    });
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const ids = await new ConfigurationService().getAudiobookshelfLibraryIds();
+    expect(ids).toEqual(['legacy-en-id']);
+  });
+});
+
 

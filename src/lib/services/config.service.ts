@@ -230,6 +230,31 @@ export class ConfigurationService {
   }
 
   /**
+   * Get the configured Audiobookshelf library IDs.
+   *
+   * Prefers the multi-library list (`audiobookshelf.library_ids`, JSON array).
+   * Falls back to the legacy single id (`audiobookshelf.library_id`) so existing
+   * single-library installs keep working with no migration. Returns [] if neither
+   * is set.
+   */
+  async getAudiobookshelfLibraryIds(): Promise<string[]> {
+    const listRaw = await this.get('audiobookshelf.library_ids');
+    if (listRaw) {
+      try {
+        const parsed = JSON.parse(listRaw);
+        if (Array.isArray(parsed)) {
+          const ids = parsed.filter((x): x is string => typeof x === 'string' && x.length > 0);
+          if (ids.length > 0) return ids;
+        }
+      } catch {
+        // Malformed list value — fall back to the legacy single id below.
+      }
+    }
+    const legacy = await this.get('audiobookshelf.library_id');
+    return legacy ? [legacy] : [];
+  }
+
+  /**
    * Get configured Audible region
    */
   async getAudibleRegion(): Promise<AudibleRegion> {
