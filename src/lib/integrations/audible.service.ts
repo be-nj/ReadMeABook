@@ -215,6 +215,16 @@ export class AudibleService {
   private initialized: boolean = false;
   private sessionUserAgent: string = '';
   private pacer: AdaptivePacer = new AdaptivePacer();
+  // When set, this instance is pinned to a fixed region and ignores the global
+  // audible.region config (used for multi-region search per shelf/language).
+  private regionOverride?: AudibleRegion;
+
+  constructor(regionOverride?: AudibleRegion) {
+    if (regionOverride) {
+      this.regionOverride = regionOverride;
+      this.region = regionOverride;
+    }
+  }
 
   public getBaseUrl(): string {
     return this.baseUrl;
@@ -236,6 +246,8 @@ export class AudibleService {
 
   private async initialize(): Promise<void> {
     if (this.initialized) {
+      // Pinned-region instances never re-initialize for a global config change.
+      if (this.regionOverride) return;
       const configService = getConfigService();
       const currentRegion = await configService.getAudibleRegion();
 
@@ -248,8 +260,12 @@ export class AudibleService {
     }
 
     try {
-      const configService = getConfigService();
-      this.region = await configService.getAudibleRegion();
+      if (this.regionOverride) {
+        this.region = this.regionOverride;
+      } else {
+        const configService = getConfigService();
+        this.region = await configService.getAudibleRegion();
+      }
       const regionConfig = AUDIBLE_REGIONS[this.region];
       this.baseUrl = regionConfig.baseUrl;
       this.sessionUserAgent = pickUserAgent();
@@ -1029,8 +1045,23 @@ export class AudibleService {
 }
 
 let audibleService: AudibleService | null = null;
+const regionScopedServices = new Map<AudibleRegion, AudibleService>();
 
-export function getAudibleService(): AudibleService {
+/**
+ * Get an AudibleService. With no argument, returns the shared instance that
+ * follows the global audible.region config (back-compat). With a region, returns
+ * a cached instance pinned to that region — used for multi-region search where a
+ * query runs in a specific shelf/language's region.
+ */
+export function getAudibleService(region?: AudibleRegion): AudibleService {
+  if (region) {
+    let svc = regionScopedServices.get(region);
+    if (!svc) {
+      svc = new AudibleService(region);
+      regionScopedServices.set(region, svc);
+    }
+    return svc;
+  }
   if (!audibleService) {
     audibleService = new AudibleService();
   }

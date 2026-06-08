@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AudibleService } from '@/lib/integrations/audible.service';
+import { AudibleService, getAudibleService } from '@/lib/integrations/audible.service';
 import { AUDIBLE_REGIONS, DEFAULT_AUDIBLE_REGION } from '@/lib/types/audible';
 
 // ---------------------------------------------------------------------------
@@ -1429,6 +1429,31 @@ describe('AudibleService', () => {
 
       expect(htmlClientMock.get).toHaveBeenCalledWith('/some-path', expect.anything());
       expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('region-pinned services (multi-region)', () => {
+    it('pins the region from the constructor', () => {
+      expect(new AudibleService('de').getRegion()).toBe('de');
+      expect(new AudibleService('uk').getRegion()).toBe('uk');
+      expect(new AudibleService().getRegion()).toBe('us');
+    });
+
+    it('getAudibleService(region) returns a cached instance pinned to that region', () => {
+      const de1 = getAudibleService('de');
+      const de2 = getAudibleService('de');
+      const uk = getAudibleService('uk');
+      expect(de1.getRegion()).toBe('de');
+      expect(de1).toBe(de2); // cached per region
+      expect(uk.getRegion()).toBe('uk');
+      expect(de1).not.toBe(uk);
+    });
+
+    it('getAudibleService() returns the shared non-pinned instance', () => {
+      const a = getAudibleService();
+      const b = getAudibleService();
+      expect(a).toBe(b);
+      expect(a).not.toBe(getAudibleService('de'));
     });
   });
 });
