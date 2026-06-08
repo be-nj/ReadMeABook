@@ -269,6 +269,34 @@ describe('SchedulerService', () => {
     expect(jobQueueMock.addPlexScanJob).toHaveBeenCalledWith('abs-lib', undefined, undefined);
   });
 
+  it('does not pin a single library for a scheduled ABS scan (scans all configured)', async () => {
+    prismaMock.scheduledJob.findUnique.mockResolvedValue({
+      id: 'job-4c',
+      name: 'Library Scan',
+      type: 'plex_library_scan',
+      schedule: '0 */6 * * *',
+      enabled: true,
+      payload: {}, // no libraryId -> full scan across every configured library
+    });
+    configServiceMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    configServiceMock.getMany.mockResolvedValue({
+      'audiobookshelf.server_url': 'http://abs',
+      'audiobookshelf.api_token': 'token',
+      'audiobookshelf.library_id': 'abs-lib-legacy',
+    });
+    jobQueueMock.addPlexScanJob.mockResolvedValue('bull-abs-all');
+    prismaMock.scheduledJob.update.mockResolvedValue({});
+
+    const { SchedulerService } = await import('@/lib/services/scheduler.service');
+    const service = new SchedulerService();
+    const jobId = await service.triggerJobNow('job-4c');
+
+    expect(jobId).toBe('bull-abs-all');
+    // Must NOT pin the legacy single library id — an empty id signals the scan
+    // processor to scan every configured library (getAudiobookshelfLibraryIds).
+    expect(jobQueueMock.addPlexScanJob).toHaveBeenCalledWith('', undefined, undefined);
+  });
+
   it('throws on unknown scheduled job types', async () => {
     prismaMock.scheduledJob.findUnique.mockResolvedValue({
       id: 'job-5',

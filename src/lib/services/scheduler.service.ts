@@ -494,7 +494,10 @@ export class SchedulerService {
         throw new Error(errorMsg);
       }
 
-      libraryId = job.payload?.libraryId || absConfig['audiobookshelf.library_id'];
+      // Multi-library: only pin a specific library when the job explicitly requests
+      // one (targeted scan). Otherwise leave it unset so the scan processor scans
+      // every configured Audiobookshelf library (getAudiobookshelfLibraryIds).
+      libraryId = job.payload?.libraryId || null;
     } else {
       const plexConfig = await configService.getMany([
         'plex_url',
