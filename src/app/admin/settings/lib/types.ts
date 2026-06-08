@@ -38,6 +38,12 @@ export interface PlexSettings {
 export interface AudiobookshelfSettings {
   serverUrl: string;
   apiToken: string;
+  /** Selected libraries to sync/own across. */
+  libraryIds: string[];
+  /**
+   * Legacy single-library id. Kept as a back-compat mirror of libraryIds[0] for
+   * any reader not yet migrated to the multi-library list. Prefer libraryIds.
+   */
   libraryId: string;
   triggerScanAfterImport: boolean;
 }

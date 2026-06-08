@@ -10,6 +10,25 @@ import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.Admin.Settings');
 
+/**
+ * Parse the configured Audiobookshelf library ids, preferring the multi-library
+ * list and falling back to the legacy single id for back-compat.
+ */
+function parseAbsLibraryIds(listRaw: string | null | undefined, legacyId: string | null | undefined): string[] {
+  if (listRaw) {
+    try {
+      const parsed = JSON.parse(listRaw);
+      if (Array.isArray(parsed)) {
+        const ids = parsed.filter((x): x is string => typeof x === 'string' && x.length > 0);
+        if (ids.length > 0) return ids;
+      }
+    } catch {
+      // Malformed list value — fall back to the legacy single id.
+    }
+  }
+  return legacyId ? [legacyId] : [];
+}
+
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
@@ -55,6 +74,10 @@ export async function GET(request: NextRequest) {
       audiobookshelf: {
         serverUrl: configMap.get('audiobookshelf.server_url') || '',
         apiToken: maskValue('api_token', configMap.get('audiobookshelf.api_token')),
+        libraryIds: parseAbsLibraryIds(
+          configMap.get('audiobookshelf.library_ids'),
+          configMap.get('audiobookshelf.library_id')
+        ),
         libraryId: configMap.get('audiobookshelf.library_id') || '',
         triggerScanAfterImport: configMap.get('audiobookshelf.trigger_scan_after_import') === 'true',
       },

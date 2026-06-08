@@ -15,7 +15,13 @@ export async function PUT(request: NextRequest) {
     return requireAdmin(req, async () => {
       try {
         const body = await request.json();
-        const { serverUrl, apiToken, libraryId, triggerScanAfterImport } = body;
+        const { serverUrl, apiToken, libraryIds, libraryId, triggerScanAfterImport } = body;
+
+        // Normalise to a list of library ids. Accept the legacy single libraryId
+        // for back-compat with older clients.
+        const ids: string[] = Array.isArray(libraryIds)
+          ? libraryIds.filter((x: unknown): x is string => typeof x === 'string' && x.length > 0)
+          : (libraryId ? [libraryId] : []);
 
         const { getConfigService } = await import('@/lib/services/config.service');
         const configService = getConfigService();
@@ -23,7 +29,9 @@ export async function PUT(request: NextRequest) {
         // Build updates array, skipping masked values
         const updates: ConfigUpdate[] = [
           { key: 'audiobookshelf.server_url', value: serverUrl || '' },
-          { key: 'audiobookshelf.library_id', value: libraryId || '' },
+          { key: 'audiobookshelf.library_ids', value: JSON.stringify(ids) },
+          // Legacy mirror of the first selection for not-yet-migrated readers.
+          { key: 'audiobookshelf.library_id', value: ids[0] || '' },
           { key: 'audiobookshelf.trigger_scan_after_import', value: triggerScanAfterImport === true ? 'true' : 'false' },
         ];
 

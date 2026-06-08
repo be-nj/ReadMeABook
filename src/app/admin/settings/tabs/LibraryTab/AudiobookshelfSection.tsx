@@ -43,10 +43,19 @@ export function AudiobookshelfSection({
     onValidationChange('audiobookshelf', false);
   };
 
-  const handleLibraryChange = (libraryId: string) => {
+  const handleLibraryToggle = (libraryId: string, checked: boolean) => {
+    const current = settings.audiobookshelf.libraryIds || [];
+    const libraryIds = checked
+      ? [...current, libraryId]
+      : current.filter((id) => id !== libraryId);
     onChange({
       ...settings,
-      audiobookshelf: { ...settings.audiobookshelf, libraryId },
+      audiobookshelf: {
+        ...settings.audiobookshelf,
+        libraryIds,
+        // Keep the legacy single id mirrored to the first selection (back-compat).
+        libraryId: libraryIds[0] || '',
+      },
     });
     onValidationChange('audiobookshelf', false);
   };
@@ -105,26 +114,36 @@ export function AudiobookshelfSection({
 
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Audiobook Library
+          Audiobook Libraries
         </label>
         {libraries.length > 0 ? (
-          <select
-            value={settings.audiobookshelf.libraryId}
-            onChange={(e) => handleLibraryChange(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-          >
-            <option value="">Select a library...</option>
-            {libraries.map((lib) => (
-              <option key={lib.id} value={lib.id}>
-                {lib.name}
-              </option>
-            ))}
-          </select>
+          <div className="space-y-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-3">
+            {libraries.map((lib) => {
+              const checked = (settings.audiobookshelf.libraryIds || []).includes(lib.id);
+              return (
+                <label
+                  key={lib.id}
+                  className="flex items-center gap-2 text-gray-900 dark:text-gray-100 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => handleLibraryToggle(lib.id, e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600"
+                  />
+                  <span>{lib.name}</span>
+                </label>
+              );
+            })}
+          </div>
         ) : (
           <div className="text-sm text-gray-500 py-2">
             Test your connection to load libraries.
           </div>
         )}
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          Select one or more libraries. Ownership is detected across all selected libraries.
+        </p>
       </div>
 
       <div className="space-y-2">
