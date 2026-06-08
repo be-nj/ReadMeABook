@@ -4,6 +4,12 @@
  *
  * Scans library (Plex or Audiobookshelf) and populates plex_library table with all audiobooks.
  * Works with both Plex and Audiobookshelf backends via abstraction layer.
+ *
+ * Multi-library: when no explicit libraryId is supplied, every configured
+ * Audiobookshelf library is scanned (see getAudiobookshelfLibraryIds). Per-library
+ * work (fetch/upsert/ABS-match/stale-removal) is scoped by plexLibraryId, so scanning
+ * one library never disturbs another. Global passes (orphan cleanup, request matching)
+ * run once after all libraries are scanned. Ownership is the union across libraries.
  */
 
 import { ScanPlexPayload } from '../services/job-queue.service';
@@ -13,12 +19,350 @@ import { getConfigService } from '../services/config.service';
 import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { RMABLogger } from '../utils/logger';
 
+interface ScanLibraryDeps {
+  libraryService: Awaited<ReturnType<typeof getLibraryService>>;
+  backendMode: 'plex' | 'audiobookshelf';
+  thumbnailCacheService: ReturnType<typeof getThumbnailCacheService>;
+  coverCachingParams: { backendBaseUrl: string; authToken: string; backendMode: 'plex' | 'audiobookshelf' };
+  logger: ReturnType<typeof RMABLogger.forJob>;
+}
+
+interface ScanLibraryResult {
+  scannedCount: number;
+  newCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  staleRemovedCount: number;
+  audiobooksReset: number;
+  requestsReset: number;
+  results: Array<{ id: string; plexGuid: string; title: string; author: string }>;
+}
+
+/**
+ * Scan a single library: fetch its items, upsert into plex_library (tagged with
+ * the library id), trigger ABS metadata matching, and remove this library's stale
+ * records. All work here is scoped to `targetLibraryId`.
+ */
+async function scanSingleLibrary(targetLibraryId: string, deps: ScanLibraryDeps): Promise<ScanLibraryResult> {
+  const { libraryService, backendMode, thumbnailCacheService, coverCachingParams, logger } = deps;
+
+  logger.info(`Fetching content from library ${targetLibraryId}`);
+
+  // 3. Get all audiobooks from library using abstraction layer
+  const libraryItems = await libraryService.getLibraryItems(targetLibraryId);
+
+  logger.info(`Found ${libraryItems.length} items in library ${targetLibraryId}`);
+
+  let newCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+  const results: ScanLibraryResult['results'] = [];
+
+  // 4. Process each library item - populate plex_library table
+  // Note: Table is still called plex_library for backwards compatibility, but now stores items from any backend
+  for (const item of libraryItems) {
+    if (!item.title || !item.externalId) {
+      skippedCount++;
+      continue;
+    }
+
+    try {
+      // Check if this audiobook already exists in plex_library by externalId (plexGuid or abs_item_id)
+      const existing = await prisma.plexLibrary.findFirst({
+        where: { plexGuid: item.externalId },
+      });
+
+      if (existing) {
+        // Update existing record with latest data
+        await prisma.plexLibrary.update({
+          where: { id: existing.id },
+          data: {
+            title: item.title,
+            author: item.author || existing.author,
+            narrator: item.narrator || existing.narrator,
+            summary: item.description || existing.summary,
+            duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : existing.duration, // Convert seconds to milliseconds
+            year: item.year || existing.year,
+            asin: item.asin || existing.asin,  // Store ASIN from library backend
+            isbn: item.isbn || existing.isbn,  // Store ISBN from library backend
+            thumbUrl: item.coverUrl || existing.thumbUrl,
+            plexLibraryId: targetLibraryId,
+            plexRatingKey: item.id || existing.plexRatingKey,
+            lastScannedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+
+        // Cache library cover (synchronous with smart skip-if-exists logic)
+        if (item.coverUrl && item.externalId) {
+          const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
+            item.externalId,
+            item.coverUrl,
+            coverCachingParams.backendBaseUrl,
+            coverCachingParams.authToken,
+            coverCachingParams.backendMode
+          );
+
+          // Update database with cached path if successful
+          if (cachedPath) {
+            await prisma.plexLibrary.update({
+              where: { id: existing.id },
+              data: { cachedLibraryCoverPath: cachedPath },
+            });
+          }
+        }
+
+        updatedCount++;
+      } else {
+        // Create new plex_library entry
+        const newLibraryItem = await prisma.plexLibrary.create({
+          data: {
+            plexGuid: item.externalId,
+            plexRatingKey: item.id,
+            title: item.title,
+            author: item.author || 'Unknown Author',
+            narrator: item.narrator,
+            summary: item.description,
+            duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : null, // Convert seconds to milliseconds
+            year: item.year,
+            asin: item.asin,  // Store ASIN from library backend (Plex or Audiobookshelf)
+            isbn: item.isbn,  // Store ISBN from library backend
+            thumbUrl: item.coverUrl,
+            plexLibraryId: targetLibraryId,
+            addedAt: item.addedAt,
+            lastScannedAt: new Date(),
+          },
+        });
+
+        // Cache library cover (synchronous with smart skip-if-exists logic)
+        if (item.coverUrl && item.externalId) {
+          const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
+            item.externalId,
+            item.coverUrl,
+            coverCachingParams.backendBaseUrl,
+            coverCachingParams.authToken,
+            coverCachingParams.backendMode
+          );
+
+          // Update database with cached path if successful
+          if (cachedPath) {
+            await prisma.plexLibrary.update({
+              where: { id: newLibraryItem.id },
+              data: { cachedLibraryCoverPath: cachedPath },
+            });
+          }
+        }
+
+        newCount++;
+        logger.info(`Added new: "${item.title}" by ${item.author}`);
+
+        results.push({
+          id: newLibraryItem.id,
+          plexGuid: newLibraryItem.plexGuid,
+          title: item.title,
+          author: item.author,
+        });
+      }
+    } catch (error) {
+      logger.error(`Failed to process "${item.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+      skippedCount++;
+    }
+  }
+
+  logger.info(`Scan complete for ${targetLibraryId}: ${libraryItems.length} items scanned, ${newCount} new, ${updatedCount} updated, ${skippedCount} skipped`);
+
+  // 4b. For Audiobookshelf: Trigger metadata match for items without ASIN
+  // This ensures ASIN gets populated so items can be matched against requests
+  if (backendMode === 'audiobookshelf') {
+    logger.info(`Checking for Audiobookshelf items without ASIN...`);
+    const { triggerABSItemMatch, getABSItem } = await import('../services/audiobookshelf/api');
+    const { generateFilesHash } = await import('../utils/files-hash');
+
+    const itemsWithoutAsin = libraryItems.filter(item => !item.asin && item.externalId);
+
+    if (itemsWithoutAsin.length > 0) {
+      logger.info(`Found ${itemsWithoutAsin.length} items without ASIN, attempting file hash matching...`);
+
+      let fileMatchCount = 0;
+      let fuzzyMatchCount = 0;
+
+      for (const item of itemsWithoutAsin) {
+        try {
+          // 1. Fetch full item details to get file list
+          const absItem = await getABSItem(item.externalId);
+
+          // 2. Extract audio filenames and generate hash
+          const audioFilenames = absItem.media?.audioFiles?.map((f: any) => f.metadata?.filename).filter(Boolean) || [];
+          const itemHash = generateFilesHash(audioFilenames);
+
+          // 3. Query database for matching downloaded request
+          let matchedAsin: string | undefined = undefined;
+
+          if (itemHash) {
+            const matchedAudiobook = await prisma.audiobook.findFirst({
+              where: {
+                filesHash: itemHash,
+                status: 'completed',
+              },
+              select: {
+                audibleAsin: true,
+                title: true,
+              },
+            });
+
+            if (matchedAudiobook?.audibleAsin) {
+              matchedAsin = matchedAudiobook.audibleAsin;
+              logger.info(
+                `File hash match found for "${item.title}" → ASIN: ${matchedAsin} (from "${matchedAudiobook.title}")`
+              );
+              fileMatchCount++;
+            }
+          }
+
+          // 4. Trigger metadata match (with ASIN if matched, undefined if not)
+          await triggerABSItemMatch(item.externalId, matchedAsin);
+
+          if (matchedAsin) {
+            logger.info(`Triggered metadata match with ASIN ${matchedAsin} for: "${item.title}"`);
+          } else {
+            logger.info(`No file match found, triggering fuzzy metadata match for: "${item.title}"`);
+            fuzzyMatchCount++;
+          }
+
+        } catch (error) {
+          logger.error(
+            `Failed to process metadata match for "${item.title}": ${error instanceof Error ? error.message : 'Unknown error'}`
+          );
+          fuzzyMatchCount++;
+        }
+      }
+
+      logger.info(
+        `Metadata match complete: ${fileMatchCount} file hash matches, ${fuzzyMatchCount} fuzzy matches (ASIN population is async)`
+      );
+    } else {
+      logger.info(`All items have ASIN, no metadata match needed`);
+    }
+  }
+
+  // 5. Remove stale records from plex_library (items no longer in the actual library)
+  // This ensures the database is a fresh snapshot of the library state.
+  // Scoped to this library via plexLibraryId so other libraries are untouched.
+  logger.info(`Checking for stale library records in ${targetLibraryId}...`);
+
+  const scannedPlexGuids = libraryItems
+    .filter(item => item.externalId)
+    .map(item => item.externalId);
+
+  let staleRemovedCount = 0;
+  let audiobooksReset = 0;
+  let requestsReset = 0;
+
+  // Safety check: Only remove stale records if we actually scanned items
+  // This prevents accidentally deleting everything if the library scan fails or returns empty
+  if (scannedPlexGuids.length > 0) {
+    // Find all plex_library entries for this library that were NOT seen in this scan
+    const staleLibraryItems = await prisma.plexLibrary.findMany({
+      where: {
+        plexLibraryId: targetLibraryId,
+        plexGuid: {
+          notIn: scannedPlexGuids,
+        },
+      },
+    });
+
+    if (staleLibraryItems.length > 0) {
+    logger.info(`Found ${staleLibraryItems.length} stale library records to remove`);
+
+    // For each stale library item, clean up references
+    for (const staleItem of staleLibraryItems) {
+      try {
+        // Find audiobooks that reference this stale library item
+        const linkedAudiobooks = await prisma.audiobook.findMany({
+          where: {
+            OR: [
+              { plexGuid: staleItem.plexGuid },
+              { absItemId: staleItem.plexGuid },
+            ],
+          },
+          include: {
+            requests: {
+              where: { deletedAt: null },
+            },
+          },
+        });
+
+        // Reset audiobook records and their requests
+        for (const audiobook of linkedAudiobooks) {
+          // Clear library linkage
+          const updateData: any = {
+            status: 'requested',
+            plexGuid: null,
+            absItemId: null,
+            updatedAt: new Date(),
+          };
+
+          await prisma.audiobook.update({
+            where: { id: audiobook.id },
+            data: updateData,
+          });
+
+          audiobooksReset++;
+
+          // Reset any 'available' requests back to 'downloaded' or 'failed'
+          for (const request of audiobook.requests) {
+            if (request.status === 'available') {
+              await prisma.request.update({
+                where: { id: request.id },
+                data: {
+                  status: 'downloaded', // Back to downloaded state (files may still be there)
+                  updatedAt: new Date(),
+                },
+              });
+              requestsReset++;
+            }
+          }
+
+          logger.info(`Reset audiobook "${staleItem.title}" (no longer in library)`);
+        }
+
+        // Delete the stale library record
+        await prisma.plexLibrary.delete({
+          where: { id: staleItem.id },
+        });
+
+        staleRemovedCount++;
+      } catch (error) {
+        logger.error(`Failed to remove stale library item "${staleItem.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    }
+
+      logger.info(`Removed ${staleRemovedCount} stale records, reset ${audiobooksReset} audiobooks and ${requestsReset} requests`);
+    } else {
+      logger.info(`No stale library records found`);
+    }
+  } else {
+    logger.warn(`Scan returned no items for ${targetLibraryId} - skipping stale record cleanup to prevent data loss`);
+  }
+
+  return {
+    scannedCount: libraryItems.length,
+    newCount,
+    updatedCount,
+    skippedCount,
+    staleRemovedCount,
+    audiobooksReset,
+    requestsReset,
+    results,
+  };
+}
+
 /**
  * Process library scan job
- * Scans library and updates plex_library table (works for both Plex and Audiobookshelf)
+ * Scans the configured library/libraries and updates plex_library (works for both Plex and Audiobookshelf)
  */
 export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
-  const { libraryId, partial, path, jobId } = payload;
+  const { libraryId, partial, jobId } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'ScanLibrary');
 
@@ -33,328 +377,63 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
     logger.info(`Backend mode: ${backendMode}`);
 
-    // 2. Get configured library ID
-    let targetLibraryId = libraryId;
-
-    if (!targetLibraryId) {
-      if (backendMode === 'audiobookshelf') {
-        const absLibraryId = await configService.get('audiobookshelf.library_id');
-        if (!absLibraryId) {
-          throw new Error('Audiobookshelf library not configured');
-        }
-        targetLibraryId = absLibraryId;
-      } else {
-        const plexConfig = await configService.getPlexConfig();
-        if (!plexConfig.libraryId) {
-          throw new Error('Plex audiobook library not configured');
-        }
-        targetLibraryId = plexConfig.libraryId;
+    // 2. Determine which libraries to scan.
+    // An explicit libraryId scans just that one (back-compat). Otherwise scan all
+    // configured libraries: every Audiobookshelf library, or the single Plex library.
+    let libraryIds: string[];
+    if (libraryId) {
+      libraryIds = [libraryId];
+    } else if (backendMode === 'audiobookshelf') {
+      libraryIds = await configService.getAudiobookshelfLibraryIds();
+      if (libraryIds.length === 0) {
+        throw new Error('Audiobookshelf library not configured');
       }
+    } else {
+      const plexConfig = await configService.getPlexConfig();
+      if (!plexConfig.libraryId) {
+        throw new Error('Plex audiobook library not configured');
+      }
+      libraryIds = [plexConfig.libraryId];
     }
 
-    // Get cover caching parameters (needed for thumbnail caching)
+    logger.info(`Scanning ${libraryIds.length} librar${libraryIds.length === 1 ? 'y' : 'ies'}: ${libraryIds.join(', ')}`);
+
+    // Get cover caching parameters (needed for thumbnail caching) - backend-level, fetched once
     const coverCachingParams = await (libraryService as any).getCoverCachingParams();
 
-    logger.info(`Fetching content from library ${targetLibraryId}`);
+    const deps: ScanLibraryDeps = {
+      libraryService,
+      backendMode,
+      thumbnailCacheService,
+      coverCachingParams,
+      logger,
+    };
 
-    // 3. Get all audiobooks from library using abstraction layer
-    const libraryItems = await libraryService.getLibraryItems(targetLibraryId);
-
-    logger.info(`Found ${libraryItems.length} items in library`);
-
+    // 3-5. Scan each library (per-library work, union into plex_library)
+    let totalScanned = 0;
     let newCount = 0;
     let updatedCount = 0;
     let skippedCount = 0;
-    const results: any[] = [];
-
-    // 4. Process each library item - populate plex_library table
-    // Note: Table is still called plex_library for backwards compatibility, but now stores items from any backend
-    for (const item of libraryItems) {
-      if (!item.title || !item.externalId) {
-        skippedCount++;
-        continue;
-      }
-
-      try {
-        // Check if this audiobook already exists in plex_library by externalId (plexGuid or abs_item_id)
-        const existing = await prisma.plexLibrary.findFirst({
-          where: { plexGuid: item.externalId },
-        });
-
-        if (existing) {
-          // Update existing record with latest data
-          await prisma.plexLibrary.update({
-            where: { id: existing.id },
-            data: {
-              title: item.title,
-              author: item.author || existing.author,
-              narrator: item.narrator || existing.narrator,
-              summary: item.description || existing.summary,
-              duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : existing.duration, // Convert seconds to milliseconds
-              year: item.year || existing.year,
-              asin: item.asin || existing.asin,  // Store ASIN from library backend
-              isbn: item.isbn || existing.isbn,  // Store ISBN from library backend
-              thumbUrl: item.coverUrl || existing.thumbUrl,
-              plexLibraryId: targetLibraryId,
-              plexRatingKey: item.id || existing.plexRatingKey,
-              lastScannedAt: new Date(),
-              updatedAt: new Date(),
-            },
-          });
-
-          // Cache library cover (synchronous with smart skip-if-exists logic)
-          if (item.coverUrl && item.externalId) {
-            const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
-              item.externalId,
-              item.coverUrl,
-              coverCachingParams.backendBaseUrl,
-              coverCachingParams.authToken,
-              coverCachingParams.backendMode
-            );
-
-            // Update database with cached path if successful
-            if (cachedPath) {
-              await prisma.plexLibrary.update({
-                where: { id: existing.id },
-                data: { cachedLibraryCoverPath: cachedPath },
-              });
-            }
-          }
-
-          updatedCount++;
-        } else {
-          // Create new plex_library entry
-          const newLibraryItem = await prisma.plexLibrary.create({
-            data: {
-              plexGuid: item.externalId,
-              plexRatingKey: item.id,
-              title: item.title,
-              author: item.author || 'Unknown Author',
-              narrator: item.narrator,
-              summary: item.description,
-              duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : null, // Convert seconds to milliseconds
-              year: item.year,
-              asin: item.asin,  // Store ASIN from library backend (Plex or Audiobookshelf)
-              isbn: item.isbn,  // Store ISBN from library backend
-              thumbUrl: item.coverUrl,
-              plexLibraryId: targetLibraryId,
-              addedAt: item.addedAt,
-              lastScannedAt: new Date(),
-            },
-          });
-
-          // Cache library cover (synchronous with smart skip-if-exists logic)
-          if (item.coverUrl && item.externalId) {
-            const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
-              item.externalId,
-              item.coverUrl,
-              coverCachingParams.backendBaseUrl,
-              coverCachingParams.authToken,
-              coverCachingParams.backendMode
-            );
-
-            // Update database with cached path if successful
-            if (cachedPath) {
-              await prisma.plexLibrary.update({
-                where: { id: newLibraryItem.id },
-                data: { cachedLibraryCoverPath: cachedPath },
-              });
-            }
-          }
-
-          newCount++;
-          logger.info(`Added new: "${item.title}" by ${item.author}`);
-
-          results.push({
-            id: newLibraryItem.id,
-            plexGuid: newLibraryItem.plexGuid,
-            title: item.title,
-            author: item.author,
-          });
-        }
-      } catch (error) {
-        logger.error(`Failed to process "${item.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
-        skippedCount++;
-      }
-    }
-
-    logger.info(`Scan complete: ${libraryItems.length} items scanned, ${newCount} new, ${updatedCount} updated, ${skippedCount} skipped`);
-
-    // 4b. For Audiobookshelf: Trigger metadata match for items without ASIN
-    // This ensures ASIN gets populated so items can be matched against requests
-    if (backendMode === 'audiobookshelf') {
-      logger.info(`Checking for Audiobookshelf items without ASIN...`);
-      const { triggerABSItemMatch, getABSItem } = await import('../services/audiobookshelf/api');
-      const { generateFilesHash } = await import('../utils/files-hash');
-
-      const itemsWithoutAsin = libraryItems.filter(item => !item.asin && item.externalId);
-
-      if (itemsWithoutAsin.length > 0) {
-        logger.info(`Found ${itemsWithoutAsin.length} items without ASIN, attempting file hash matching...`);
-
-        let fileMatchCount = 0;
-        let fuzzyMatchCount = 0;
-
-        for (const item of itemsWithoutAsin) {
-          try {
-            // 1. Fetch full item details to get file list
-            const absItem = await getABSItem(item.externalId);
-
-            // 2. Extract audio filenames and generate hash
-            const audioFilenames = absItem.media?.audioFiles?.map((f: any) => f.metadata?.filename).filter(Boolean) || [];
-            const itemHash = generateFilesHash(audioFilenames);
-
-            // 3. Query database for matching downloaded request
-            let matchedAsin: string | undefined = undefined;
-
-            if (itemHash) {
-              const matchedAudiobook = await prisma.audiobook.findFirst({
-                where: {
-                  filesHash: itemHash,
-                  status: 'completed',
-                },
-                select: {
-                  audibleAsin: true,
-                  title: true,
-                },
-              });
-
-              if (matchedAudiobook?.audibleAsin) {
-                matchedAsin = matchedAudiobook.audibleAsin;
-                logger.info(
-                  `File hash match found for "${item.title}" → ASIN: ${matchedAsin} (from "${matchedAudiobook.title}")`
-                );
-                fileMatchCount++;
-              }
-            }
-
-            // 4. Trigger metadata match (with ASIN if matched, undefined if not)
-            await triggerABSItemMatch(item.externalId, matchedAsin);
-
-            if (matchedAsin) {
-              logger.info(`Triggered metadata match with ASIN ${matchedAsin} for: "${item.title}"`);
-            } else {
-              logger.info(`No file match found, triggering fuzzy metadata match for: "${item.title}"`);
-              fuzzyMatchCount++;
-            }
-
-          } catch (error) {
-            logger.error(
-              `Failed to process metadata match for "${item.title}": ${error instanceof Error ? error.message : 'Unknown error'}`
-            );
-            fuzzyMatchCount++;
-          }
-        }
-
-        logger.info(
-          `Metadata match complete: ${fileMatchCount} file hash matches, ${fuzzyMatchCount} fuzzy matches (ASIN population is async)`
-        );
-      } else {
-        logger.info(`All items have ASIN, no metadata match needed`);
-      }
-    }
-
-    // 5. Remove stale records from plex_library (items no longer in the actual library)
-    // This ensures the database is a fresh snapshot of the library state
-    logger.info(`Checking for stale library records...`);
-
-    const scannedPlexGuids = libraryItems
-      .filter(item => item.externalId)
-      .map(item => item.externalId);
-
     let staleRemovedCount = 0;
     let audiobooksReset = 0;
     let requestsReset = 0;
+    const results: ScanLibraryResult['results'] = [];
 
-    // Safety check: Only remove stale records if we actually scanned items
-    // This prevents accidentally deleting everything if the library scan fails or returns empty
-    if (scannedPlexGuids.length > 0) {
-      // Find all plex_library entries for this library that were NOT seen in this scan
-      const staleLibraryItems = await prisma.plexLibrary.findMany({
-        where: {
-          plexLibraryId: targetLibraryId,
-          plexGuid: {
-            notIn: scannedPlexGuids,
-          },
-        },
-      });
-
-      if (staleLibraryItems.length > 0) {
-      logger.info(`Found ${staleLibraryItems.length} stale library records to remove`);
-
-      // For each stale library item, clean up references
-      for (const staleItem of staleLibraryItems) {
-        try {
-          // Find audiobooks that reference this stale library item
-          const linkedAudiobooks = await prisma.audiobook.findMany({
-            where: {
-              OR: [
-                { plexGuid: staleItem.plexGuid },
-                { absItemId: staleItem.plexGuid },
-              ],
-            },
-            include: {
-              requests: {
-                where: { deletedAt: null },
-              },
-            },
-          });
-
-          // Reset audiobook records and their requests
-          for (const audiobook of linkedAudiobooks) {
-            // Clear library linkage
-            const updateData: any = {
-              status: 'requested',
-              plexGuid: null,
-              absItemId: null,
-              updatedAt: new Date(),
-            };
-
-            await prisma.audiobook.update({
-              where: { id: audiobook.id },
-              data: updateData,
-            });
-
-            audiobooksReset++;
-
-            // Reset any 'available' requests back to 'downloaded' or 'failed'
-            for (const request of audiobook.requests) {
-              if (request.status === 'available') {
-                await prisma.request.update({
-                  where: { id: request.id },
-                  data: {
-                    status: 'downloaded', // Back to downloaded state (files may still be there)
-                    updatedAt: new Date(),
-                  },
-                });
-                requestsReset++;
-              }
-            }
-
-            logger.info(`Reset audiobook "${staleItem.title}" (no longer in library)`);
-          }
-
-          // Delete the stale library record
-          await prisma.plexLibrary.delete({
-            where: { id: staleItem.id },
-          });
-
-          staleRemovedCount++;
-        } catch (error) {
-          logger.error(`Failed to remove stale library item "${staleItem.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      }
-
-        logger.info(`Removed ${staleRemovedCount} stale records, reset ${audiobooksReset} audiobooks and ${requestsReset} requests`);
-      } else {
-        logger.info(`No stale library records found`);
-      }
-    } else {
-      logger.warn(`Scan returned no items - skipping stale record cleanup to prevent data loss`);
+    for (const targetLibraryId of libraryIds) {
+      const r = await scanSingleLibrary(targetLibraryId, deps);
+      totalScanned += r.scannedCount;
+      newCount += r.newCount;
+      updatedCount += r.updatedCount;
+      skippedCount += r.skippedCount;
+      staleRemovedCount += r.staleRemovedCount;
+      audiobooksReset += r.audiobooksReset;
+      requestsReset += r.requestsReset;
+      results.push(...r.results);
     }
 
     // 5b. Clean up orphaned audiobooks (audiobooks with plexGuid/absItemId that don't exist in plex_library)
-    // This handles cases where the library record was already deleted but audiobook record wasn't updated
+    // This handles cases where the library record was already deleted but audiobook record wasn't updated.
+    // Global across all libraries: runs once after every library has been scanned.
     logger.info(`Checking for orphaned audiobooks...`);
 
     const allPlexGuidsInLibrary = await prisma.plexLibrary.findMany({
@@ -433,7 +512,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
       logger.info(`No orphaned audiobooks found`);
     }
 
-    // 6. Match all non-terminal audiobook requests against library
+    // 6. Match all non-terminal audiobook requests against library (global, once)
     // Note: Ebook requests don't match to Plex/ABS library - they stop at 'downloaded' status
     logger.info(`Checking for matchable requests...`);
     const matchableRequests = await prisma.request.findMany({
@@ -463,7 +542,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
         const audiobook = request.audiobook;
 
         // Use the centralized matcher (handles ASIN matching, title normalization, narrator matching, etc.)
-        // Works for both Plex and Audiobookshelf backends
+        // Works for both Plex and Audiobookshelf backends. Matches against the union of all libraries.
         const match = await findPlexMatch({
           asin: audiobook.audibleAsin || '',
           title: audiobook.title,
@@ -532,7 +611,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     }
 
     logger.info(`Matched ${matchedCount}/${matchableRequests.length} requests`, {
-      totalScanned: libraryItems.length,
+      librariesScanned: libraryIds.length,
+      totalScanned,
       newCount,
       updatedCount,
       skippedCount,
@@ -548,8 +628,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
       success: true,
       message: `Library scan completed successfully (${backendMode})`,
       backendMode,
-      libraryId: targetLibraryId,
-      totalScanned: libraryItems.length,
+      libraryIds,
+      totalScanned,
       newCount,
       updatedCount,
       skippedCount,

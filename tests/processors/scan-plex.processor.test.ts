@@ -14,6 +14,7 @@ const libraryServiceMock = vi.hoisted(() => ({
 const configMock = vi.hoisted(() => ({
   getBackendMode: vi.fn(),
   getPlexConfig: vi.fn(),
+  getAudiobookshelfLibraryIds: vi.fn(),
   get: vi.fn(),
 }));
 const thumbnailCacheServiceMock = vi.hoisted(() => ({
@@ -215,7 +216,7 @@ describe('processScanPlex', () => {
 
   it('throws when audiobookshelf library is not configured', async () => {
     configMock.getBackendMode.mockResolvedValue('audiobookshelf');
-    configMock.get.mockResolvedValue(null);
+    configMock.getAudiobookshelfLibraryIds.mockResolvedValue([]);
 
     libraryServiceMock.getCoverCachingParams.mockResolvedValue({
       backendBaseUrl: 'http://abs',
@@ -229,6 +230,52 @@ describe('processScanPlex', () => {
       'Audiobookshelf library not configured'
     );
     expect(libraryServiceMock.getLibraryItems).not.toHaveBeenCalled();
+  });
+
+  it('scans every configured Audiobookshelf library and tags rows per library (multi-library)', async () => {
+    configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    configMock.getAudiobookshelfLibraryIds.mockResolvedValue(['lib-en', 'lib-de']);
+
+    libraryServiceMock.getCoverCachingParams.mockResolvedValue({
+      backendBaseUrl: 'http://abs',
+      authToken: 'token',
+      backendMode: 'audiobookshelf',
+    });
+
+    libraryServiceMock.getLibraryItems.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'lib-en'
+          ? [{ id: 'r-en', externalId: 'guid-en', title: 'English Book', author: 'A', asin: 'ASINEN', addedAt: new Date() }]
+          : [{ id: 'r-de', externalId: 'guid-de', title: 'Deutsches Buch', author: 'B', asin: 'ASINDE', addedAt: new Date() }]
+      )
+    );
+
+    prismaMock.plexLibrary.findFirst.mockResolvedValue(null); // every item is new
+    prismaMock.plexLibrary.create.mockResolvedValue({ id: 'new-id', plexGuid: 'g' });
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]); // no stale records, no orphan guids
+    prismaMock.audiobook.findMany.mockResolvedValue([]);
+    prismaMock.request.findMany.mockResolvedValue([]);
+
+    const { processScanPlex } = await import('@/lib/processors/scan-plex.processor');
+    const result = await processScanPlex({ jobId: 'job-multi' });
+
+    // Both libraries fetched
+    expect(libraryServiceMock.getLibraryItems).toHaveBeenCalledWith('lib-en');
+    expect(libraryServiceMock.getLibraryItems).toHaveBeenCalledWith('lib-de');
+    expect(libraryServiceMock.getLibraryItems).toHaveBeenCalledTimes(2);
+
+    // Each library's item is tagged with its own library id (provenance)
+    const createData = prismaMock.plexLibrary.create.mock.calls.map((c: any) => c[0].data);
+    expect(createData).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ plexGuid: 'guid-en', plexLibraryId: 'lib-en' }),
+        expect.objectContaining({ plexGuid: 'guid-de', plexLibraryId: 'lib-de' }),
+      ])
+    );
+
+    expect(result.libraryIds).toEqual(['lib-en', 'lib-de']);
+    expect(result.totalScanned).toBe(2);
+    expect(result.newCount).toBe(2);
   });
 
   it('removes stale items and resets linked audiobooks and requests', async () => {
@@ -317,6 +364,7 @@ describe('processScanPlex', () => {
   it('matches audiobookshelf requests without re-triggering metadata match', async () => {
     configMock.getBackendMode.mockResolvedValue('audiobookshelf');
     configMock.get.mockResolvedValue('abs-lib');
+    configMock.getAudiobookshelfLibraryIds.mockResolvedValue(['abs-lib']);
 
     libraryServiceMock.getCoverCachingParams.mockResolvedValue({
       backendBaseUrl: 'http://abs',
@@ -375,6 +423,7 @@ describe('processScanPlex', () => {
   it('uses file hash matching for ABS items without ASIN', async () => {
     configMock.getBackendMode.mockResolvedValue('audiobookshelf');
     configMock.get.mockResolvedValue('abs-lib');
+    configMock.getAudiobookshelfLibraryIds.mockResolvedValue(['abs-lib']);
 
     libraryServiceMock.getCoverCachingParams.mockResolvedValue({
       backendBaseUrl: 'http://abs',
@@ -449,6 +498,7 @@ describe('processScanPlex', () => {
   it('falls back to fuzzy matching when no file hash match found', async () => {
     configMock.getBackendMode.mockResolvedValue('audiobookshelf');
     configMock.get.mockResolvedValue('abs-lib');
+    configMock.getAudiobookshelfLibraryIds.mockResolvedValue(['abs-lib']);
 
     libraryServiceMock.getCoverCachingParams.mockResolvedValue({
       backendBaseUrl: 'http://abs',
