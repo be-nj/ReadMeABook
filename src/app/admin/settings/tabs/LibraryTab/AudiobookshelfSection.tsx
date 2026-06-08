@@ -57,7 +57,10 @@ export function AudiobookshelfSection({
         libraryId: libraryIds[0] || '',
       },
     });
-    onValidationChange('audiobookshelf', false);
+    // The library list is only shown after a successful connection test, so toggling
+    // a library does not require re-testing. Stay valid as long as at least one
+    // library is selected (and block saving with none).
+    onValidationChange('audiobookshelf', libraryIds.length > 0);
   };
 
   const handleTriggerScanChange = (triggerScanAfterImport: boolean) => {
