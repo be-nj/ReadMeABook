@@ -177,8 +177,9 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     logger.info(`Final metadata for path organization: year=${year || 'null'}, narrator=${narrator || 'null'}, series=${series || 'null'}, seriesPart=${seriesPart || 'null'}`);
 
-    // Get file organizer (reads media_dir from database config)
-    const organizer = await getFileOrganizer();
+    // Get file organizer, filing into this audiobook's routed shelf path when set
+    // (multi-library); otherwise the global media_dir.
+    const organizer = await getFileOrganizer(audiobook.shelfMediaPath);
 
     // Read path template from configuration
     const templateConfig = await prisma.configuration.findUnique({

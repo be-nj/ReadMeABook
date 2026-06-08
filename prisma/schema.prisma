@@ -200,6 +200,10 @@ model Audiobook {
   // File hash for accurate library matching (SHA256 of sorted audio filenames)
   filesHash String? @map("files_hash") @db.Text
 
+  // Multi-library routing target, resolved at request time from the matching shelf.
+  shelfMediaPath String? @map("shelf_media_path") // media output path for organize
+  shelfLibraryId String? @map("shelf_library_id") // ABS library to scan after import
+
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   completedAt DateTime? @map("completed_at")

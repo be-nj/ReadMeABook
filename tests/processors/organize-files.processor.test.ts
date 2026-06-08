@@ -9,6 +9,7 @@ import { generateFilesHash } from '@/lib/utils/files-hash';
 
 const prismaMock = createPrismaMock();
 const organizerMock = vi.hoisted(() => ({ organize: vi.fn() }));
+const getFileOrganizerMock = vi.hoisted(() => vi.fn());
 const libraryServiceMock = vi.hoisted(() => ({ triggerLibraryScan: vi.fn() }));
 const jobQueueMock = vi.hoisted(() => ({
   addNotificationJob: vi.fn(() => Promise.resolve()),
@@ -26,7 +27,7 @@ vi.mock('@/lib/db', () => ({
 }));
 
 vi.mock('@/lib/utils/file-organizer', () => ({
-  getFileOrganizer: () => organizerMock,
+  getFileOrganizer: getFileOrganizerMock,
 }));
 
 vi.mock('@/lib/services/library', () => ({
@@ -46,6 +47,7 @@ vi.mock('@/lib/utils/format-coercion', () => formatCoercionMock);
 describe('processOrganizeFiles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getFileOrganizerMock.mockReturnValue(organizerMock);
     // Default mock for request lookup (processor needs to determine request type)
     prismaMock.request.findUnique.mockResolvedValue({
       id: 'req-default',
@@ -98,6 +100,45 @@ describe('processOrganizeFiles', () => {
 
     expect(result.success).toBe(true);
     expect(libraryServiceMock.triggerLibraryScan).toHaveBeenCalledWith('lib-1');
+  });
+
+  it('files into the audiobook shelf media path when set (multi-library routing)', async () => {
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-shelf',
+      title: 'Deutsches Buch',
+      author: 'Autor',
+      narrator: null,
+      coverArtUrl: null,
+      audibleAsin: 'ASIN-DE',
+      shelfMediaPath: '/data/media/audio/audiobooks',
+      shelfLibraryId: 'de-lib',
+    });
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/data/media/audio/audiobooks/Autor/Deutsches Buch',
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: ['/data/media/audio/audiobooks/Autor/Deutsches Buch/book.m4b'],
+    });
+    prismaMock.audiobook.update.mockResolvedValue({});
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobook_path_template') return '{author}/{title}';
+      return null; // trigger-scan disabled, etc.
+    });
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    const result = await processOrganizeFiles({
+      requestId: 'req-shelf',
+      audiobookId: 'a-shelf',
+      downloadPath: '/downloads/de',
+      jobId: 'job-shelf',
+    });
+
+    expect(result.success).toBe(true);
+    // The organizer must be built for this shelf's media path, not the global media_dir.
+    expect(getFileOrganizerMock).toHaveBeenCalledWith('/data/media/audio/audiobooks');
   });
 
   it('skips filesystem scan when disabled', async () => {

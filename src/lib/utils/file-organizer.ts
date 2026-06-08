@@ -987,13 +987,18 @@ export class FileOrganizer {
  * Get FileOrganizer instance configured from database settings
  * Reads media_dir, file_chmod, dir_chmod from database configuration
  */
-export async function getFileOrganizer(): Promise<FileOrganizer> {
-  // Read media_dir from database config
-  const config = await prisma.configuration.findUnique({
-    where: { key: 'media_dir' },
-  });
-
-  const mediaDir = config?.value || process.env.MEDIA_DIR || '/media/audiobooks';
+export async function getFileOrganizer(mediaDirOverride?: string | null): Promise<FileOrganizer> {
+  // Use the per-shelf media path when provided (multi-library routing); otherwise
+  // fall back to the global media_dir from config.
+  let mediaDir: string;
+  if (mediaDirOverride) {
+    mediaDir = mediaDirOverride;
+  } else {
+    const config = await prisma.configuration.findUnique({
+      where: { key: 'media_dir' },
+    });
+    mediaDir = config?.value || process.env.MEDIA_DIR || '/media/audiobooks';
+  }
   const tempDir = process.env.TEMP_DIR || '/tmp/readmeabook';
 
   // Read file/directory permission settings

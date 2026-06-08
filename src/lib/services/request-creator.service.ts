@@ -15,6 +15,7 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
+import { selectShelf } from '@/lib/utils/shelf-router';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -103,6 +104,8 @@ export async function createRequestForUser(
   let seriesPart: string | undefined;
   let seriesAsin: string | undefined;
   let releaseDate: Date | null = null;
+  let bookLanguage: string | undefined;
+  let bookGenres: string[] | undefined;
   try {
     const audibleService = getAudibleService();
     const audnexusData = await audibleService.getAudiobookDetails(audiobook.asin);
@@ -124,8 +127,30 @@ export async function createRequestForUser(
     if (audnexusData?.series) series = audnexusData.series;
     if (audnexusData?.seriesPart) seriesPart = audnexusData.seriesPart;
     if (audnexusData?.seriesAsin) seriesAsin = audnexusData.seriesAsin;
+    if (audnexusData?.language) bookLanguage = audnexusData.language;
+    if (audnexusData?.genres) bookGenres = audnexusData.genres;
   } catch (error) {
     logger.warn(`Failed to fetch Audnexus data for ASIN ${audiobook.asin}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+
+  // Resolve the target shelf (multi-library routing). Stored on the audiobook so
+  // the organize step files the download into the right library path. Falls back
+  // to the global media_dir downstream when no shelf matches.
+  let shelfMediaPath: string | null = null;
+  let shelfLibraryId: string | null = null;
+  try {
+    const shelves = await getConfigService().getShelves();
+    if (shelves.length > 0) {
+      const route = selectShelf({ language: bookLanguage, genres: bookGenres }, shelves);
+      if (route.shelf) {
+        shelfMediaPath = route.shelf.mediaPath || null;
+        shelfLibraryId = route.shelf.libraryId || null;
+      } else {
+        logger.info(`No shelf auto-matched for "${audiobook.title}" (${route.reason}); will use default media path`);
+      }
+    }
+  } catch (error) {
+    logger.warn(`Shelf routing failed for ASIN ${audiobook.asin}: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 
   // Find or create audiobook record
@@ -146,6 +171,8 @@ export async function createRequestForUser(
         series,
         seriesPart,
         seriesAsin,
+        shelfMediaPath,
+        shelfLibraryId,
         status: 'requested',
       },
     });
@@ -160,6 +187,8 @@ export async function createRequestForUser(
     if (series) updates.series = series;
     if (seriesPart) updates.seriesPart = seriesPart;
     if (seriesAsin) updates.seriesAsin = seriesAsin;
+    if (shelfMediaPath) updates.shelfMediaPath = shelfMediaPath;
+    if (shelfLibraryId) updates.shelfLibraryId = shelfLibraryId;
 
     if (Object.keys(updates).length > 0) {
       audiobookRecord = await prisma.audiobook.update({
