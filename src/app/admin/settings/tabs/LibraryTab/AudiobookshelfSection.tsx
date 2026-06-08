@@ -5,7 +5,7 @@
 
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { Settings, ABSLibrary } from '../../lib/types';
+import { Settings, ABSLibrary, Shelf, ShelfAudience } from '../../lib/types';
 import { AUDIBLE_REGIONS } from '@/lib/types/audible';
 
 interface AudiobookshelfSectionProps {
@@ -18,6 +18,19 @@ interface AudiobookshelfSectionProps {
   onTestConnection: () => void;
 }
 
+const SHELF_LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'es', label: 'Español' },
+  { code: 'fr', label: 'Français' },
+];
+
+const SHELF_AUDIENCES: { value: ShelfAudience; label: string }[] = [
+  { value: 'adult', label: 'Adult' },
+  { value: 'teen', label: 'Teen' },
+  { value: 'kids', label: 'Kids' },
+];
+
 export function AudiobookshelfSection({
   settings,
   onChange,
@@ -27,6 +40,8 @@ export function AudiobookshelfSection({
   testResult,
   onTestConnection,
 }: AudiobookshelfSectionProps) {
+  const shelves = settings.audiobookshelf.shelves || [];
+
   const handleServerUrlChange = (serverUrl: string) => {
     onChange({
       ...settings,
@@ -43,24 +58,52 @@ export function AudiobookshelfSection({
     onValidationChange('audiobookshelf', false);
   };
 
-  const handleLibraryToggle = (libraryId: string, checked: boolean) => {
-    const current = settings.audiobookshelf.libraryIds || [];
-    const libraryIds = checked
-      ? [...current, libraryId]
-      : current.filter((id) => id !== libraryId);
+  // Persist a new shelf set, keeping exactly one primary and the legacy mirrors in
+  // sync. The library list is only shown after a successful connection test, so
+  // shelf edits never require re-testing — validity tracks whether every shelf has
+  // a language and a media path (and there is at least one shelf).
+  const applyShelves = (next: Shelf[]) => {
+    let primarySeen = false;
+    const normalized = next.map((s) => {
+      const isPrimary = !!s.isPrimary && !primarySeen;
+      if (isPrimary) primarySeen = true;
+      return { ...s, isPrimary };
+    });
+    if (!primarySeen && normalized.length > 0) normalized[0].isPrimary = true;
+
+    const primary = normalized.find((s) => s.isPrimary) || normalized[0];
     onChange({
       ...settings,
       audiobookshelf: {
         ...settings.audiobookshelf,
-        libraryIds,
-        // Keep the legacy single id mirrored to the first selection (back-compat).
-        libraryId: libraryIds[0] || '',
+        shelves: normalized,
+        libraryIds: normalized.map((s) => s.libraryId),
+        libraryId: primary?.libraryId || '',
       },
     });
-    // The library list is only shown after a successful connection test, so toggling
-    // a library does not require re-testing. Stay valid as long as at least one
-    // library is selected (and block saving with none).
-    onValidationChange('audiobookshelf', libraryIds.length > 0);
+
+    const valid = normalized.length > 0 && normalized.every((s) => !!s.language && !!s.mediaPath);
+    onValidationChange('audiobookshelf', valid);
+  };
+
+  const handleLibraryToggle = (libraryId: string, checked: boolean) => {
+    if (checked) {
+      if (shelves.some((s) => s.libraryId === libraryId)) return;
+      applyShelves([
+        ...shelves,
+        { libraryId, language: '', audience: 'adult', mediaPath: '', isPrimary: shelves.length === 0 },
+      ]);
+    } else {
+      applyShelves(shelves.filter((s) => s.libraryId !== libraryId));
+    }
+  };
+
+  const handleShelfField = (libraryId: string, patch: Partial<Shelf>) => {
+    applyShelves(shelves.map((s) => (s.libraryId === libraryId ? { ...s, ...patch } : s)));
+  };
+
+  const handleSetPrimary = (libraryId: string) => {
+    applyShelves(shelves.map((s) => ({ ...s, isPrimary: s.libraryId === libraryId })));
   };
 
   const handleTriggerScanChange = (triggerScanAfterImport: boolean) => {
@@ -71,11 +114,12 @@ export function AudiobookshelfSection({
   };
 
   const handleAudibleRegionChange = (audibleRegion: string) => {
-    onChange({
-      ...settings,
-      audibleRegion,
-    });
+    onChange({ ...settings, audibleRegion });
   };
+
+  const fieldClass =
+    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500';
+  const subLabelClass = 'block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1';
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -84,7 +128,7 @@ export function AudiobookshelfSection({
           Audiobookshelf Server
         </h2>
         <p className="text-gray-600 dark:text-gray-400 mb-6">
-          Configure your Audiobookshelf server connection and audiobook library.
+          Configure your Audiobookshelf server connection and audiobook libraries.
         </p>
       </div>
 
@@ -117,25 +161,83 @@ export function AudiobookshelfSection({
 
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Audiobook Libraries
+          Audiobook Libraries (Shelves)
         </label>
         {libraries.length > 0 ? (
-          <div className="space-y-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-3">
+          <div className="space-y-3">
             {libraries.map((lib) => {
-              const checked = (settings.audiobookshelf.libraryIds || []).includes(lib.id);
+              const shelf = shelves.find((s) => s.libraryId === lib.id);
               return (
-                <label
+                <div
                   key={lib.id}
-                  className="flex items-center gap-2 text-gray-900 dark:text-gray-100 cursor-pointer"
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-3"
                 >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(e) => handleLibraryToggle(lib.id, e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600"
-                  />
-                  <span>{lib.name}</span>
-                </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-gray-900 dark:text-gray-100">
+                    <input
+                      type="checkbox"
+                      checked={!!shelf}
+                      onChange={(e) => handleLibraryToggle(lib.id, e.target.checked)}
+                      className="rounded border-gray-300 dark:border-gray-600"
+                    />
+                    <span className="font-medium">{lib.name}</span>
+                  </label>
+
+                  {shelf && (
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 pl-6">
+                      <div>
+                        <label className={subLabelClass}>Language</label>
+                        <select
+                          value={shelf.language}
+                          onChange={(e) => handleShelfField(lib.id, { language: e.target.value })}
+                          className={fieldClass}
+                        >
+                          <option value="">Select…</option>
+                          {SHELF_LANGUAGES.map((l) => (
+                            <option key={l.code} value={l.code}>
+                              {l.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={subLabelClass}>Audience</label>
+                        <select
+                          value={shelf.audience}
+                          onChange={(e) =>
+                            handleShelfField(lib.id, { audience: e.target.value as ShelfAudience })
+                          }
+                          className={fieldClass}
+                        >
+                          {SHELF_AUDIENCES.map((a) => (
+                            <option key={a.value} value={a.value}>
+                              {a.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className={subLabelClass}>Media output path</label>
+                        <Input
+                          type="text"
+                          value={shelf.mediaPath}
+                          onChange={(e) => handleShelfField(lib.id, { mediaPath: e.target.value })}
+                          placeholder="/data/media/audio/audiobooks"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer text-gray-700 dark:text-gray-300">
+                          <input
+                            type="radio"
+                            name="abs-primary-shelf"
+                            checked={!!shelf.isPrimary}
+                            onChange={() => handleSetPrimary(lib.id)}
+                          />
+                          <span>Primary (search default &amp; routing fallback)</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -145,7 +247,8 @@ export function AudiobookshelfSection({
           </div>
         )}
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Select one or more libraries. Ownership is detected across all selected libraries.
+          Enable each library you use and set its language, audience, and where downloads are filed.
+          Ownership is detected across all enabled libraries.
         </p>
       </div>
 
@@ -163,8 +266,8 @@ export function AudiobookshelfSection({
             </span>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Automatically triggers Audiobookshelf to scan its filesystem after organizing downloaded files.
-              Only enable this if you have Audiobookshelf's filesystem watcher (automatic scanning) disabled.
-              Most users should leave this disabled and rely on Audiobookshelf's built-in automatic detection.
+              Only enable this if you have Audiobookshelf&apos;s filesystem watcher (automatic scanning) disabled.
+              Most users should leave this disabled and rely on Audiobookshelf&apos;s built-in automatic detection.
             </p>
           </div>
         </label>
@@ -190,36 +293,8 @@ export function AudiobookshelfSection({
             </option>
           ))}
         </select>
-        {AUDIBLE_REGIONS[settings.audibleRegion as keyof typeof AUDIBLE_REGIONS]?.language !== 'en' && (
-          <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 border border-amber-200 dark:border-amber-800 mt-2">
-            <div className="flex gap-3">
-              <svg
-                className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <div>
-                <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
-                  Non-English Region
-                </p>
-                <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                  Many features such as search, discovery, and metadata matching are not yet fully
-                  supported for non-English regions. You may still proceed, but expect limited
-                  functionality.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Select the Audible region that matches your metadata engine (Audnexus/Audible Agent)
-          configuration in Audiobookshelf. This ensures accurate book matching and metadata.
+          Default Audible region for search and metadata. (Per-shelf regions arrive with multi-region search.)
         </p>
       </div>
 

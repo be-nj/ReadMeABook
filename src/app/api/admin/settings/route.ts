@@ -29,6 +29,59 @@ function parseAbsLibraryIds(listRaw: string | null | undefined, legacyId: string
   return legacyId ? [legacyId] : [];
 }
 
+type LoadedShelf = {
+  libraryId: string;
+  language: string;
+  audience: 'kids' | 'teen' | 'adult';
+  mediaPath: string;
+  isPrimary: boolean;
+};
+
+/**
+ * Parse configured shelves for the settings UI, preferring audiobookshelf.shelves
+ * and falling back to deriving one shelf per legacy library id (inheriting media_dir).
+ */
+function parseShelves(configMap: Map<string, string | null>): LoadedShelf[] {
+  const raw = configMap.get('audiobookshelf.shelves');
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const shelves: LoadedShelf[] = parsed
+          .filter((s) => s && typeof s.libraryId === 'string' && s.libraryId.length > 0)
+          .map((s) => ({
+            libraryId: s.libraryId as string,
+            language: typeof s.language === 'string' ? s.language : '',
+            audience:
+              s.audience === 'kids' || s.audience === 'teen' || s.audience === 'adult'
+                ? s.audience
+                : 'adult',
+            mediaPath: typeof s.mediaPath === 'string' ? s.mediaPath : '',
+            isPrimary: s.isPrimary === true,
+          }));
+        if (shelves.length > 0) {
+          if (!shelves.some((s) => s.isPrimary)) shelves[0].isPrimary = true;
+          return shelves;
+        }
+      }
+    } catch {
+      // Malformed value — fall back to legacy derivation below.
+    }
+  }
+  const ids = parseAbsLibraryIds(
+    configMap.get('audiobookshelf.library_ids'),
+    configMap.get('audiobookshelf.library_id')
+  );
+  const mediaPath = configMap.get('media_dir') || '';
+  return ids.map((libraryId, i) => ({
+    libraryId,
+    language: '',
+    audience: 'adult' as const,
+    mediaPath,
+    isPrimary: i === 0,
+  }));
+}
+
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
@@ -74,6 +127,7 @@ export async function GET(request: NextRequest) {
       audiobookshelf: {
         serverUrl: configMap.get('audiobookshelf.server_url') || '',
         apiToken: maskValue('api_token', configMap.get('audiobookshelf.api_token')),
+        shelves: parseShelves(configMap),
         libraryIds: parseAbsLibraryIds(
           configMap.get('audiobookshelf.library_ids'),
           configMap.get('audiobookshelf.library_id')

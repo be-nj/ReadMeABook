@@ -35,15 +35,29 @@ export interface PlexSettings {
 /**
  * Audiobookshelf library configuration
  */
+export type ShelfAudience = 'kids' | 'teen' | 'adult';
+
+/**
+ * A configured shelf: one Audiobookshelf library plus the routing axes and the
+ * media output path requests are organised into. (Region is handled with the
+ * multi-region search work; language drives routing here.)
+ */
+export interface Shelf {
+  libraryId: string;
+  language: string;
+  audience: ShelfAudience;
+  mediaPath: string;
+  isPrimary?: boolean;
+}
+
 export interface AudiobookshelfSettings {
   serverUrl: string;
   apiToken: string;
-  /** Selected libraries to sync/own across. */
+  /** Configured shelves (multi-library destinations). */
+  shelves: Shelf[];
+  /** Derived mirror of shelves[].libraryId (back-compat for owned-sync readers). */
   libraryIds: string[];
-  /**
-   * Legacy single-library id. Kept as a back-compat mirror of libraryIds[0] for
-   * any reader not yet migrated to the multi-library list. Prefer libraryIds.
-   */
+  /** Legacy single-library id mirror (= primary/first shelf's library). */
   libraryId: string;
   triggerScanAfterImport: boolean;
 }
