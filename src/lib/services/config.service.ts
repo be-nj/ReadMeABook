@@ -32,6 +32,26 @@ export interface PlexConfig {
 }
 
 /**
+ * Age-appropriateness tier for a shelf. Ordered: kids < teen < adult.
+ */
+export type ShelfAudience = 'kids' | 'teen' | 'adult';
+
+/**
+ * A Shelf is a request destination + owned-source: one Audiobookshelf library
+ * plus the routing axes (language, audience), the Audible region used to search
+ * its language, and the filesystem path (RMAB's view) organised audiobooks are
+ * written to.
+ */
+export interface Shelf {
+  libraryId: string;
+  language: string;
+  audience: ShelfAudience;
+  region: string;
+  mediaPath: string;
+  isPrimary?: boolean;
+}
+
+/**
  * Configuration service for reading settings from database
  */
 export class ConfigurationService {
@@ -230,14 +250,66 @@ export class ConfigurationService {
   }
 
   /**
-   * Get the configured Audiobookshelf library IDs.
+   * Get the configured shelves — the multi-library destinations RMAB syncs/owns
+   * and routes requests into.
    *
-   * Prefers the multi-library list (`audiobookshelf.library_ids`, JSON array).
-   * Falls back to the legacy single id (`audiobookshelf.library_id`) so existing
-   * single-library installs keep working with no migration. Returns [] if neither
-   * is set.
+   * Prefers `audiobookshelf.shelves` (JSON array). Falls back to the legacy
+   * single-library config (library_ids / library_id, each inheriting the global
+   * Audible region and media_dir) as one shelf per library, so existing installs
+   * keep working with no migration. Returns [] if nothing is configured.
    */
-  async getAudiobookshelfLibraryIds(): Promise<string[]> {
+  async getShelves(): Promise<Shelf[]> {
+    const shelvesRaw = await this.get('audiobookshelf.shelves');
+    if (shelvesRaw) {
+      try {
+        const parsed = JSON.parse(shelvesRaw);
+        if (Array.isArray(parsed)) {
+          const shelves = parsed
+            .map((s) => this.normalizeShelf(s))
+            .filter((s): s is Shelf => s !== null);
+          if (shelves.length > 0) return shelves;
+        }
+      } catch {
+        // Malformed value — fall back to legacy derivation below.
+      }
+    }
+
+    // Back-compat: one shelf per legacy library id, inheriting the global region
+    // and media_dir. Language/audience are unknown for legacy single-library
+    // installs (audience defaults to adult); routing over a single shelf is trivial.
+    const legacyIds = await this.getLegacyLibraryIds();
+    if (legacyIds.length === 0) return [];
+    const region = await this.getAudibleRegion();
+    const mediaPath = (await this.get('media_dir')) || '';
+    return legacyIds.map((libraryId, i) => ({
+      libraryId,
+      language: '',
+      audience: 'adult' as ShelfAudience,
+      region,
+      mediaPath,
+      isPrimary: i === 0,
+    }));
+  }
+
+  private normalizeShelf(raw: unknown): Shelf | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const s = raw as Record<string, unknown>;
+    const libraryId = typeof s.libraryId === 'string' ? s.libraryId : '';
+    if (!libraryId) return null;
+    const aud = s.audience;
+    const audience: ShelfAudience = aud === 'kids' || aud === 'teen' || aud === 'adult' ? aud : 'adult';
+    return {
+      libraryId,
+      language: typeof s.language === 'string' ? s.language : '',
+      audience,
+      region: typeof s.region === 'string' ? s.region : '',
+      mediaPath: typeof s.mediaPath === 'string' ? s.mediaPath : '',
+      isPrimary: s.isPrimary === true,
+    };
+  }
+
+  /** Raw legacy library id list: `library_ids` (JSON), falling back to `library_id`. */
+  private async getLegacyLibraryIds(): Promise<string[]> {
     const listRaw = await this.get('audiobookshelf.library_ids');
     if (listRaw) {
       try {
@@ -252,6 +324,14 @@ export class ConfigurationService {
     }
     const legacy = await this.get('audiobookshelf.library_id');
     return legacy ? [legacy] : [];
+  }
+
+  /**
+   * Get the configured Audiobookshelf library IDs (the libraries to sync/own),
+   * derived from the configured shelves.
+   */
+  async getAudiobookshelfLibraryIds(): Promise<string[]> {
+    return (await this.getShelves()).map((s) => s.libraryId);
   }
 
   /**

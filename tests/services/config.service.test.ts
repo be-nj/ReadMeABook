@@ -261,4 +261,70 @@ describe('ConfigurationService — Audiobookshelf library IDs (multi-library)', 
   });
 });
 
+describe('ConfigurationService — getShelves (multi-library write-side model)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const mockConfig = (values: Record<string, string>) => {
+    prismaMock.configuration.findUnique.mockImplementation((args: { where: { key: string } }) => {
+      const key = args.where.key;
+      return Promise.resolve(
+        key in values ? { key, value: values[key], encrypted: false } : null
+      );
+    });
+  };
+
+  it('returns configured shelves with their fields', async () => {
+    mockConfig({
+      'audiobookshelf.shelves': JSON.stringify([
+        { libraryId: 'de-id', language: 'de', audience: 'adult', region: 'de', mediaPath: '/data/media/audio/audiobooks', isPrimary: true },
+        { libraryId: 'kids-id', language: 'de', audience: 'kids', region: 'de', mediaPath: '/data/media/kids/audio/audiobooks' },
+      ]),
+    });
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const shelves = await new ConfigurationService().getShelves();
+    expect(shelves).toHaveLength(2);
+    expect(shelves[0]).toMatchObject({ libraryId: 'de-id', language: 'de', audience: 'adult', mediaPath: '/data/media/audio/audiobooks', isPrimary: true });
+    expect(shelves[1]).toMatchObject({ libraryId: 'kids-id', audience: 'kids', isPrimary: false });
+  });
+
+  it('derives one shelf per legacy library id, inheriting region and media_dir', async () => {
+    mockConfig({
+      'audiobookshelf.library_ids': JSON.stringify(['en-id', 'de-id']),
+      'audible.region': 'uk',
+      'media_dir': '/data/media/audio/audiobooks',
+    });
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const shelves = await new ConfigurationService().getShelves();
+    expect(shelves).toEqual([
+      { libraryId: 'en-id', language: '', audience: 'adult', region: 'uk', mediaPath: '/data/media/audio/audiobooks', isPrimary: true },
+      { libraryId: 'de-id', language: '', audience: 'adult', region: 'uk', mediaPath: '/data/media/audio/audiobooks', isPrimary: false },
+    ]);
+  });
+
+  it('defaults an unknown audience to adult', async () => {
+    mockConfig({
+      'audiobookshelf.shelves': JSON.stringify([{ libraryId: 'x', audience: 'bogus' }]),
+    });
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const shelves = await new ConfigurationService().getShelves();
+    expect(shelves[0].audience).toBe('adult');
+  });
+
+  it('falls back to legacy when the shelves value is malformed', async () => {
+    mockConfig({ 'audiobookshelf.shelves': 'not-json', 'audiobookshelf.library_id': 'legacy-id' });
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const shelves = await new ConfigurationService().getShelves();
+    expect(shelves).toHaveLength(1);
+    expect(shelves[0]).toMatchObject({ libraryId: 'legacy-id', audience: 'adult', isPrimary: true });
+  });
+
+  it('returns [] when nothing is configured', async () => {
+    mockConfig({});
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    expect(await new ConfigurationService().getShelves()).toEqual([]);
+  });
+});
+
 
