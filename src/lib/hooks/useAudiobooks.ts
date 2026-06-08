@@ -73,15 +73,17 @@ function dedupeByAsin<T extends { asin: string }>(items: T[]): T[] {
   });
 }
 
-export function useSearch(query: string) {
+export function useSearch(query: string, region?: string) {
   const prevQueryRef = useRef(query);
+  const prevRegionRef = useRef(region);
+  const regionParam = region ? `&region=${encodeURIComponent(region)}` : '';
 
   const { data, error, size, setSize, isLoading, isValidating } = useSWRInfinite(
     (pageIndex, prevPageData) => {
       if (!query || query.length === 0) return null;
-      if (pageIndex === 0) return `/api/audiobooks/search?q=${encodeURIComponent(query)}&page=1`;
+      if (pageIndex === 0) return `/api/audiobooks/search?q=${encodeURIComponent(query)}&page=1${regionParam}`;
       if (!prevPageData?.hasMore) return null;
-      return `/api/audiobooks/search?q=${encodeURIComponent(query)}&page=${pageIndex + 1}`;
+      return `/api/audiobooks/search?q=${encodeURIComponent(query)}&page=${pageIndex + 1}${regionParam}`;
     },
     authenticatedFetcher,
     {
@@ -91,13 +93,14 @@ export function useSearch(query: string) {
     }
   );
 
-  // Reset to page 1 when query changes
+  // Reset to page 1 when query or region changes
   useEffect(() => {
-    if (query !== prevQueryRef.current) {
+    if (query !== prevQueryRef.current || region !== prevRegionRef.current) {
       prevQueryRef.current = query;
+      prevRegionRef.current = region;
       setSize(1);
     }
-  }, [query, setSize]);
+  }, [query, region, setSize]);
 
   const results = data ? dedupeByAsin(data.flatMap(page => page?.results || [])) : [];
   const totalResults = data?.[0]?.totalResults || 0;

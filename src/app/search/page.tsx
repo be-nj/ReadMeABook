@@ -13,10 +13,12 @@ import { useSearch, Audiobook } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { SectionToolbar } from '@/components/ui/SectionToolbar';
 import { usePreferences } from '@/contexts/PreferencesContext';
+import { AUDIBLE_REGIONS } from '@/lib/types/audible';
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [region, setRegion] = useState('');
   const { cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable } = usePreferences();
 
   // Debounce search query
@@ -28,7 +30,7 @@ export default function SearchPage() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const { results, totalResults, hasMore, isLoading, isLoadingMore, loadMore } = useSearch(debouncedQuery);
+  const { results, totalResults, hasMore, isLoading, isLoadingMore, loadMore } = useSearch(debouncedQuery, region);
 
   // Filter out available titles when hideAvailable is enabled
   const filteredResults = useMemo(
@@ -108,6 +110,26 @@ export default function SearchPage() {
             )}
           </div>
         </form>
+
+        {/* Search region (multi-region): defaults to the primary shelf's region */}
+        <div className="max-w-3xl mx-auto -mt-4 flex items-center justify-end gap-2 text-sm">
+          <label htmlFor="search-region" className="text-gray-500 dark:text-gray-400">
+            Region
+          </label>
+          <select
+            id="search-region"
+            value={region}
+            onChange={(e) => setRegion(e.target.value)}
+            className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+          >
+            <option value="">Auto (primary shelf)</option>
+            {Object.values(AUDIBLE_REGIONS).map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {/* Results */}
         {debouncedQuery ? (

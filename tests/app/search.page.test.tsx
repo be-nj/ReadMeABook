@@ -111,7 +111,8 @@ describe('SearchPage', () => {
     render(<SearchPage />);
 
     expect(screen.getByText('Start typing to search for audiobooks')).toBeInTheDocument();
-    expect(useSearchMock).toHaveBeenCalledWith('');
+    // Region defaults to '' (Auto = primary shelf) alongside the query.
+    expect(useSearchMock).toHaveBeenCalledWith('', '');
   });
 
   it('debounces search input and loads more results', async () => {
