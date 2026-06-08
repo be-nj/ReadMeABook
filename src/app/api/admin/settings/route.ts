@@ -31,6 +31,7 @@ function parseAbsLibraryIds(listRaw: string | null | undefined, legacyId: string
 
 type LoadedShelf = {
   libraryId: string;
+  region: string;
   language: string;
   audience: 'kids' | 'teen' | 'adult';
   mediaPath: string;
@@ -51,6 +52,7 @@ function parseShelves(configMap: Map<string, string | null>): LoadedShelf[] {
           .filter((s) => s && typeof s.libraryId === 'string' && s.libraryId.length > 0)
           .map((s) => ({
             libraryId: s.libraryId as string,
+            region: typeof s.region === 'string' ? s.region : '',
             language: typeof s.language === 'string' ? s.language : '',
             audience:
               s.audience === 'kids' || s.audience === 'teen' || s.audience === 'adult'
@@ -73,8 +75,10 @@ function parseShelves(configMap: Map<string, string | null>): LoadedShelf[] {
     configMap.get('audiobookshelf.library_id')
   );
   const mediaPath = configMap.get('media_dir') || '';
+  const region = configMap.get('audible.region') || '';
   return ids.map((libraryId, i) => ({
     libraryId,
+    region,
     language: '',
     audience: 'adult' as const,
     mediaPath,

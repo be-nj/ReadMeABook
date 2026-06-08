@@ -18,13 +18,6 @@ interface AudiobookshelfSectionProps {
   onTestConnection: () => void;
 }
 
-const SHELF_LANGUAGES = [
-  { code: 'en', label: 'English' },
-  { code: 'de', label: 'Deutsch' },
-  { code: 'es', label: 'Español' },
-  { code: 'fr', label: 'Français' },
-];
-
 const SHELF_AUDIENCES: { value: ShelfAudience; label: string }[] = [
   { value: 'adult', label: 'Adult' },
   { value: 'teen', label: 'Teen' },
@@ -41,6 +34,10 @@ export function AudiobookshelfSection({
   onTestConnection,
 }: AudiobookshelfSectionProps) {
   const shelves = settings.audiobookshelf.shelves || [];
+
+  // Region implies the language (1:1), so picking a region also sets the routing language.
+  const langForRegion = (region: string): string =>
+    (AUDIBLE_REGIONS[region as keyof typeof AUDIBLE_REGIONS]?.language as string) || '';
 
   const handleServerUrlChange = (serverUrl: string) => {
     onChange({
@@ -89,9 +86,10 @@ export function AudiobookshelfSection({
   const handleLibraryToggle = (libraryId: string, checked: boolean) => {
     if (checked) {
       if (shelves.some((s) => s.libraryId === libraryId)) return;
+      const region = settings.audibleRegion || 'us';
       applyShelves([
         ...shelves,
-        { libraryId, language: '', audience: 'adult', mediaPath: '', isPrimary: shelves.length === 0 },
+        { libraryId, region, language: langForRegion(region), audience: 'adult', mediaPath: '', isPrimary: shelves.length === 0 },
       ]);
     } else {
       applyShelves(shelves.filter((s) => s.libraryId !== libraryId));
@@ -100,6 +98,10 @@ export function AudiobookshelfSection({
 
   const handleShelfField = (libraryId: string, patch: Partial<Shelf>) => {
     applyShelves(shelves.map((s) => (s.libraryId === libraryId ? { ...s, ...patch } : s)));
+  };
+
+  const handleRegionChange = (libraryId: string, region: string) => {
+    handleShelfField(libraryId, { region, language: langForRegion(region) });
   };
 
   const handleSetPrimary = (libraryId: string) => {
@@ -185,16 +187,16 @@ export function AudiobookshelfSection({
                   {shelf && (
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 pl-6">
                       <div>
-                        <label className={subLabelClass}>Language</label>
+                        <label className={subLabelClass}>Region (Audible store / language)</label>
                         <select
-                          value={shelf.language}
-                          onChange={(e) => handleShelfField(lib.id, { language: e.target.value })}
+                          value={shelf.region}
+                          onChange={(e) => handleRegionChange(lib.id, e.target.value)}
                           className={fieldClass}
                         >
                           <option value="">Select…</option>
-                          {SHELF_LANGUAGES.map((l) => (
-                            <option key={l.code} value={l.code}>
-                              {l.label}
+                          {Object.values(AUDIBLE_REGIONS).map((r) => (
+                            <option key={r.code} value={r.code}>
+                              {r.name}
                             </option>
                           ))}
                         </select>

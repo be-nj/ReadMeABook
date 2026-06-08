@@ -11,8 +11,30 @@ import { persistDedupGroups, collapseByExistingWorks } from '@/lib/services/work
 import { getCurrentUserAsync } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
+import { getConfigService } from '@/lib/services/config.service';
+import { AUDIBLE_REGIONS, type AudibleRegion } from '@/lib/types/audible';
 
 const logger = RMABLogger.create('API.Audiobooks.Search');
+
+/**
+ * Resolve the Audible region for a search: an explicit `region` param wins,
+ * otherwise the primary shelf's region, otherwise undefined (global default).
+ */
+async function resolveSearchRegion(regionParam: string | null): Promise<AudibleRegion | undefined> {
+  if (regionParam && regionParam in AUDIBLE_REGIONS) {
+    return regionParam as AudibleRegion;
+  }
+  try {
+    const shelves = await getConfigService().getShelves();
+    const primary = shelves.find((s) => s.isPrimary) || shelves[0];
+    if (primary?.region && primary.region in AUDIBLE_REGIONS) {
+      return primary.region as AudibleRegion;
+    }
+  } catch {
+    // Fall back to the global region.
+  }
+  return undefined;
+}
 
 /**
  * GET /api/audiobooks/search?q=query&page=1
@@ -34,7 +56,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const audibleService = getAudibleService();
+    const region = await resolveSearchRegion(searchParams.get('region'));
+    const audibleService = getAudibleService(region);
     const results = await audibleService.search(query, page);
 
     // Get current user (optional — JWT or API token — for request-status enrichment)
