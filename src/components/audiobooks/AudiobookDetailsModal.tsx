@@ -675,6 +675,38 @@ export function AudiobookDetailsModal({
             className="sticky bottom-0 z-20 p-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-t border-gray-200/50 dark:border-gray-700/50"
             style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
           >
+            {/* Shelf routing (multi-library): full-width row above the actions so the
+                action button + icon buttons stay on one aligned line. */}
+            {status.canRequest && user && shelfOptions.length > 0 && (
+              <div className="mb-3">
+                <label
+                  htmlFor="shelf-route-select"
+                  className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1"
+                >
+                  File into library
+                </label>
+                <select
+                  id="shelf-route-select"
+                  aria-label="File into library"
+                  value={selectedShelf}
+                  onChange={(e) => setSelectedShelf(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {shelfReason && <option value="">Select a library…</option>}
+                  {shelfOptions.map((s) => (
+                    <option key={s.libraryId} value={s.libraryId}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                {shelfReason && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                    No automatic match — please choose where to file this book.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center gap-3">
               {/* Main Action */}
               <div className="flex-1">
@@ -686,54 +718,21 @@ export function AudiobookDetailsModal({
                     In Your Library
                   </button>
                 ) : status.canRequest ? (
-                  <>
-                    {user && shelfOptions.length > 0 && (
-                      <div className="mb-3">
-                        <label
-                          htmlFor="shelf-route-select"
-                          className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1"
-                        >
-                          File into library
-                        </label>
-                        <select
-                          id="shelf-route-select"
-                          aria-label="File into library"
-                          value={selectedShelf}
-                          onChange={(e) => setSelectedShelf(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          {shelfReason && (
-                            <option value="">Select a library…</option>
-                          )}
-                          {shelfOptions.map((s) => (
-                            <option key={s.libraryId} value={s.libraryId}>
-                              {s.label}
-                            </option>
-                          ))}
-                        </select>
-                        {shelfReason && (
-                          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                            No automatic match — please choose where to file this book.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    <button
-                      onClick={handleRequest}
-                      disabled={isRequesting || !user}
-                      className="w-full py-3 px-4 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isRequesting ? (
-                        <span className="flex items-center justify-center gap-2">
-                          <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                          Requesting...
-                        </span>
-                      ) : !user ? 'Sign in to Request' : 'Request Audiobook'}
-                    </button>
-                  </>
+                  <button
+                    onClick={handleRequest}
+                    disabled={isRequesting || !user}
+                    className="w-full py-3 px-4 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isRequesting ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Requesting...
+                      </span>
+                    ) : !user ? 'Sign in to Request' : 'Request Audiobook'}
+                  </button>
                 ) : (
                   <button
                     disabled
