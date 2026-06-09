@@ -24,6 +24,18 @@
 
 ---
 
+> [!NOTE]
+> ## 🔱 This fork: multi-library support
+>
+> This is a fork of [kikootwo/ReadMeABook](https://github.com/kikootwo/ReadMeABook) that adds **multi-library shelves** on top of upstream. Everything below is upstream behaviour; the fork-only additions are:
+>
+> - **Owned across all libraries** — ownership is detected across every enabled Audiobookshelf library, not just one.
+> - **Language/audience routing** — requests are filed into the matching library by language and audience (audience falls back upward only).
+> - **Per-shelf Audible region** + a **region switch in search** (browse the German vs. English store).
+> - **Per-request override** — the request dialog shows the resolved target library and lets you change it.
+>
+> Strictly backwards compatible: a single-library setup behaves exactly as upstream and is migrated automatically. See [Multi-library shelves](#-multi-library-shelves) for details. Fork-only items are marked **🔱** throughout this README.
+
 ## What is this?
 
 You run Plex or Audiobookshelf with audiobooks. You want more audiobooks. You search indexers, download torrents or NZBs, organize files, wait for your server to scan. ReadMeABook does all of that automatically.
@@ -37,7 +49,7 @@ User friendly audible-backed searches, multi-file chapter merging, e-book sideca
 ## Features
 
 - **Plex** or **Audiobookshelf**
-- **Multi-library shelves**: Route requests to the right library by language & audience, with per-shelf region and a per-request override
+- **🔱 Multi-library shelves** *(fork)*: Route requests to the right library by language & audience, with per-shelf region and a per-request override
 - **Torrents** via qBittorrent
 - **Usenet** via SABnzbd
 - **Prowlarr** for indexer search (torrents + NZBs)
@@ -47,7 +59,9 @@ User friendly audible-backed searches, multi-file chapter merging, e-book sideca
 - **Request approval**: Admin approval workflow for multi-user setups
 - **Setup wizard**: Step-by-step guided config with connection testing
 
-## Multi-library shelves
+## 🔱 Multi-library shelves
+
+> **Fork-only feature** — not in upstream [kikootwo/ReadMeABook](https://github.com/kikootwo/ReadMeABook).
 
 Run more than one Audiobookshelf library (e.g. German, English, and a kids
 collection) from a single instance. Each enabled library becomes a **shelf** with:
