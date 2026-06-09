@@ -24,6 +24,7 @@ async function getPreferences(req: AuthenticatedRequest) {
       where: { id: userId },
       select: {
         bookDateLibraryScope: true,
+        bookDateLibraryId: true,
         bookDateFavoriteBookIds: true,
         bookDateCustomPrompt: true,
         bookDateOnboardingComplete: true,
@@ -50,6 +51,7 @@ async function getPreferences(req: AuthenticatedRequest) {
 
     return NextResponse.json({
       libraryScope: effectiveScope,
+      libraryId: user.bookDateLibraryId || null,
       favoriteBookIds: user.bookDateFavoriteBookIds ? JSON.parse(user.bookDateFavoriteBookIds) : [],
       customPrompt: user.bookDateCustomPrompt || '', // Always return empty string for UI
       onboardingComplete: user.bookDateOnboardingComplete || false,
@@ -77,7 +79,7 @@ async function updatePreferences(req: AuthenticatedRequest) {
 
     // Parse request body
     const body = await req.json();
-    const { libraryScope, favoriteBookIds, customPrompt, onboardingComplete } = body;
+    const { libraryScope, libraryId, favoriteBookIds, customPrompt, onboardingComplete } = body;
 
     // Validate library scope
     if (libraryScope && !['full', 'rated', 'favorites'].includes(libraryScope)) {
@@ -123,10 +125,29 @@ async function updatePreferences(req: AuthenticatedRequest) {
       );
     }
 
+    // Validate library selection (if provided): must be one of the configured
+    // libraries. Empty/null means "all configured libraries".
+    if (libraryId !== undefined && libraryId !== null && libraryId !== '') {
+      const configuredIds = await configService.getAudiobookshelfLibraryIds().catch(() => [] as string[]);
+      const plexConfig = backendMode === 'plex' ? await configService.getPlexConfig() : null;
+      const validIds = backendMode === 'audiobookshelf'
+        ? configuredIds
+        : (plexConfig?.libraryId ? [plexConfig.libraryId] : []);
+      if (!validIds.includes(libraryId)) {
+        return NextResponse.json(
+          { error: 'Invalid library selection' },
+          { status: 400 }
+        );
+      }
+    }
+
     // Build update data object
     const updateData: any = {};
     if (libraryScope !== undefined) {
       updateData.bookDateLibraryScope = libraryScope || 'full';
+    }
+    if (libraryId !== undefined) {
+      updateData.bookDateLibraryId = libraryId ? libraryId : null;
     }
     if (favoriteBookIds !== undefined) {
       // Store as JSON string
@@ -149,6 +170,7 @@ async function updatePreferences(req: AuthenticatedRequest) {
       data: updateData,
       select: {
         bookDateLibraryScope: true,
+        bookDateLibraryId: true,
         bookDateFavoriteBookIds: true,
         bookDateCustomPrompt: true,
         bookDateOnboardingComplete: true,
@@ -158,6 +180,7 @@ async function updatePreferences(req: AuthenticatedRequest) {
     return NextResponse.json({
       success: true,
       libraryScope: updatedUser.bookDateLibraryScope || 'full',
+      libraryId: updatedUser.bookDateLibraryId || null,
       favoriteBookIds: updatedUser.bookDateFavoriteBookIds ? JSON.parse(updatedUser.bookDateFavoriteBookIds) : [],
       customPrompt: updatedUser.bookDateCustomPrompt || '', // Always return empty string for UI
       onboardingComplete: updatedUser.bookDateOnboardingComplete || false,

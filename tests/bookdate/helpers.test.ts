@@ -11,6 +11,7 @@ const configMock = vi.hoisted(() => ({
   getBackendMode: vi.fn(),
   get: vi.fn(),
   getPlexConfig: vi.fn(),
+  getAudiobookshelfLibraryIds: vi.fn(),
 }));
 const encryptionMock = vi.hoisted(() => ({
   decrypt: vi.fn(),
@@ -64,6 +65,8 @@ vi.mock('@/lib/utils/logger', () => ({
 describe('BookDate helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: one configured Audiobookshelf library (multi-library helper).
+    configMock.getAudiobookshelfLibraryIds.mockResolvedValue(['abs-lib-1']);
     loggerMock.create.mockReturnValue({
       info: vi.fn(),
       warn: vi.fn(),
@@ -82,6 +85,7 @@ describe('BookDate helpers', () => {
   it('returns empty library when audiobookshelf has no library id', async () => {
     configMock.getBackendMode.mockResolvedValue('audiobookshelf');
     configMock.get.mockResolvedValue(null);
+    configMock.getAudiobookshelfLibraryIds.mockResolvedValue([]);
 
     const { getUserLibraryBooks } = await import('@/lib/bookdate/helpers');
     const result = await getUserLibraryBooks('user-1', 'rated');

@@ -235,9 +235,30 @@ async function enrichWithUserRatings(
  * @param scope - 'full' | 'listened' | 'rated' | 'favorites'
  * @returns Array of library books (max 40)
  */
+/**
+ * Resolve which library ids BookDate should draw from for this user.
+ * For Audiobookshelf (multi-library): a valid `selectedLibraryId` narrows to that
+ * one shelf; otherwise the union of all configured libraries. For Plex: the
+ * single configured audiobook library.
+ */
+async function resolveBookDateLibraryIds(
+  backendMode: string,
+  selectedLibraryId?: string | null
+): Promise<string[]> {
+  const configService = getConfigService();
+  if (backendMode === 'audiobookshelf') {
+    const all = await configService.getAudiobookshelfLibraryIds();
+    if (selectedLibraryId && all.includes(selectedLibraryId)) return [selectedLibraryId];
+    return all;
+  }
+  const plexConfig = await configService.getPlexConfig();
+  return plexConfig.libraryId ? [plexConfig.libraryId] : [];
+}
+
 export async function getUserLibraryBooks(
   userId: string,
-  scope: 'full' | 'listened' | 'rated' | 'favorites'
+  scope: 'full' | 'listened' | 'rated' | 'favorites',
+  selectedLibraryId?: string | null
 ): Promise<LibraryBook[]> {
   try {
     const configService = getConfigService();
@@ -248,6 +269,14 @@ export async function getUserLibraryBooks(
       logger.warn('Audiobookshelf does not support ratings, falling back to full library');
       scope = 'full';
     }
+
+    // Which libraries to draw from (single selected shelf or the union of all).
+    const libraryIds = await resolveBookDateLibraryIds(backendMode, selectedLibraryId);
+    if (libraryIds.length === 0) {
+      logger.warn('No library configured for BookDate');
+      return [];
+    }
+    const libraryFilter = { in: libraryIds };
 
     // Handle favorites scope
     if (scope === 'favorites') {
@@ -264,29 +293,11 @@ export async function getUserLibraryBooks(
         logger.warn('Favorites scope selected but no favorites stored, falling back to full library');
         scope = 'full';
       } else {
-        // Get library ID for filtering
-        let libraryId: string;
-        if (backendMode === 'audiobookshelf') {
-          const absLibraryId = await configService.get('audiobookshelf.library_id');
-          if (!absLibraryId) {
-            logger.warn('No Audiobookshelf library ID configured');
-            return [];
-          }
-          libraryId = absLibraryId;
-        } else {
-          const plexConfig = await configService.getPlexConfig();
-          if (!plexConfig.libraryId) {
-            logger.warn('No Plex library ID configured');
-            return [];
-          }
-          libraryId = plexConfig.libraryId;
-        }
-
-        // Query favorite books
+        // Query favorite books, scoped to the selected library/libraries.
         const cachedBooks = await prisma.plexLibrary.findMany({
           where: {
             id: { in: favoriteIds },
-            plexLibraryId: libraryId, // Ensure books are from current library
+            plexLibraryId: libraryFilter,
           },
           select: {
             title: true,
@@ -317,25 +328,6 @@ export async function getUserLibraryBooks(
       }
     }
 
-    // Get library ID based on backend mode
-    let libraryId: string;
-    if (backendMode === 'audiobookshelf') {
-      const absLibraryId = await configService.get('audiobookshelf.library_id');
-      if (!absLibraryId) {
-        logger.warn('No Audiobookshelf library ID configured');
-        return [];
-      }
-      libraryId = absLibraryId;
-    } else {
-      // Plex mode
-      const plexConfig = await configService.getPlexConfig();
-      if (!plexConfig.libraryId) {
-        logger.warn('No Plex library ID configured');
-        return [];
-      }
-      libraryId = plexConfig.libraryId;
-    }
-
     // Check user type for local admin detection (Plex-specific logic)
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -343,8 +335,8 @@ export async function getUserLibraryBooks(
     });
     const isLocalAdmin = user?.plexId.startsWith('local-') ?? false;
 
-    // Build query filters
-    let whereClause: any = { plexLibraryId: libraryId };
+    // Build query filters (scoped to the selected library/libraries)
+    let whereClause: any = { plexLibraryId: libraryFilter };
     let takeLimit = 40;
 
     // Apply rating filter only for Plex backend with rated scope
@@ -486,11 +478,12 @@ export async function getUserRecentSwipes(
  */
 export async function buildAIPrompt(
   userId: string,
-  config: { libraryScope: string; customPrompt?: string | null }
+  config: { libraryScope: string; customPrompt?: string | null; libraryId?: string | null }
 ): Promise<string> {
   const libraryBooks = await getUserLibraryBooks(
     userId,
-    config.libraryScope as 'full' | 'listened' | 'rated' | 'favorites'
+    config.libraryScope as 'full' | 'listened' | 'rated' | 'favorites',
+    config.libraryId ?? null
   );
 
   const swipeHistory = await getUserRecentSwipes(userId, 10);

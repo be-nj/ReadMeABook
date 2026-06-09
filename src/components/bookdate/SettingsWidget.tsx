@@ -17,6 +17,8 @@ interface SettingsWidgetProps {
 
 export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboardingComplete }: SettingsWidgetProps) {
   const [libraryScope, setLibraryScope] = useState<'full' | 'rated' | 'favorites'>('full');
+  const [libraryId, setLibraryId] = useState<string>(''); // '' = all configured libraries
+  const [libraries, setLibraries] = useState<{ libraryId: string; name: string }[]>([]);
   const [favoriteBookIds, setFavoriteBookIds] = useState<string[]>([]);
   const [showBookPicker, setShowBookPicker] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
@@ -55,9 +57,23 @@ export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboar
 
       const data = await response.json();
       setLibraryScope(data.libraryScope || 'full');
+      setLibraryId(data.libraryId || '');
       setFavoriteBookIds(data.favoriteBookIds || []);
       setCustomPrompt(data.customPrompt || '');
       setBackendCapabilities(data.backendCapabilities || { supportsRatings: true });
+
+      // Load the list of libraries the user can scope to.
+      try {
+        const libRes = await fetch('/api/bookdate/libraries', {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+        if (libRes.ok) {
+          const libData = await libRes.json();
+          setLibraries(libData.libraries || []);
+        }
+      } catch {
+        // Non-fatal: the picker just won't show.
+      }
     } catch (error: any) {
       console.error('Load preferences error:', error);
       setError(error.message || 'Failed to load preferences');
@@ -88,6 +104,7 @@ export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboar
         },
         body: JSON.stringify({
           libraryScope,
+          libraryId: libraryId || null,
           favoriteBookIds: libraryScope === 'favorites' ? favoriteBookIds : undefined,
           customPrompt: trimmedPrompt || null, // Send null if empty
           onboardingComplete: isOnboarding ? true : undefined,
@@ -175,6 +192,31 @@ export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboar
               {successMessage && (
                 <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-green-700 dark:text-green-300 text-sm">
                   {successMessage}
+                </div>
+              )}
+
+              {/* Library selection (multi-library): pick which library to draw
+                  recommendations from, e.g. only kids books. Hidden when a single
+                  library is configured. */}
+              {libraries.length > 1 && (
+                <div className="mb-6">
+                  <label htmlFor="bookdate-library" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Recommend from
+                  </label>
+                  <select
+                    id="bookdate-library"
+                    value={libraryId}
+                    onChange={(e) => setLibraryId(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="">All libraries</option>
+                    {libraries.map((lib) => (
+                      <option key={lib.libraryId} value={lib.libraryId}>{lib.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    Recommendations are based on your taste in the selected library.
+                  </p>
                 </div>
               )}
 

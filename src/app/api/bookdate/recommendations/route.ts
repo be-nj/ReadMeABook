@@ -61,6 +61,7 @@ async function handler(req: AuthenticatedRequest) {
       select: {
         bookDateLibraryScope: true,
         bookDateCustomPrompt: true,
+        bookDateLibraryId: true,
       },
     });
 
@@ -75,6 +76,7 @@ async function handler(req: AuthenticatedRequest) {
     const userPreferences = {
       libraryScope: user.bookDateLibraryScope || 'full',
       customPrompt: user.bookDateCustomPrompt || null,
+      libraryId: user.bookDateLibraryId || null,
     };
 
     // Build prompt and call AI

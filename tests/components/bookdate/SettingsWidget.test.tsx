@@ -18,6 +18,30 @@ vi.mock('@/components/bookdate/BookPickerModal', () => ({
     ) : null,
 }));
 
+/**
+ * Route fetch by URL so the component's extra GET /api/bookdate/libraries call
+ * doesn't disturb order-dependent assertions. `prefsOk: false` simulates a
+ * failed preferences load; `libraries` lets a test exercise the library picker.
+ */
+function routeFetch(
+  prefs: any,
+  opts?: { prefsOk?: boolean; libraries?: { libraryId: string; name: string }[] }
+) {
+  return vi.fn((url: string, init?: any) => {
+    if (url === '/api/bookdate/libraries') {
+      return Promise.resolve({ ok: true, json: async () => ({ libraries: opts?.libraries ?? [] }) });
+    }
+    if (url === '/api/bookdate/preferences' && init?.method === 'PUT') {
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    }
+    // GET preferences
+    return Promise.resolve({ ok: opts?.prefsOk ?? true, json: async () => prefs });
+  });
+}
+
+const putCall = (fetchMock: any) =>
+  fetchMock.mock.calls.find((c: any[]) => c[0] === '/api/bookdate/preferences' && c[1]?.method === 'PUT');
+
 describe('SettingsWidget', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -25,14 +49,11 @@ describe('SettingsWidget', () => {
   });
 
   it('loads preferences and populates the form', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        libraryScope: 'rated',
-        favoriteBookIds: ['book-1'],
-        customPrompt: 'Custom prompt',
-        backendCapabilities: { supportsRatings: true },
-      }),
+    const fetchMock = routeFetch({
+      libraryScope: 'rated',
+      favoriteBookIds: ['book-1'],
+      customPrompt: 'Custom prompt',
+      backendCapabilities: { supportsRatings: true },
     });
     vi.stubGlobal('fetch', fetchMock);
     localStorage.setItem('accessToken', 'token-789');
@@ -52,14 +73,11 @@ describe('SettingsWidget', () => {
   });
 
   it('requires favorites selection before saving', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        libraryScope: 'full',
-        favoriteBookIds: [],
-        customPrompt: '',
-        backendCapabilities: { supportsRatings: true },
-      }),
+    const fetchMock = routeFetch({
+      libraryScope: 'full',
+      favoriteBookIds: [],
+      customPrompt: '',
+      backendCapabilities: { supportsRatings: true },
     });
     vi.stubGlobal('fetch', fetchMock);
     localStorage.setItem('accessToken', 'token-000');
@@ -74,18 +92,44 @@ describe('SettingsWidget', () => {
     expect(await screen.findByText('Please select at least 1 favorite book')).toBeInTheDocument();
   });
 
+  it('shows the library picker and includes the selection when saving', async () => {
+    const fetchMock = routeFetch(
+      {
+        libraryScope: 'full',
+        libraryId: '',
+        favoriteBookIds: [],
+        customPrompt: '',
+        backendCapabilities: { supportsRatings: true },
+      },
+      {
+        libraries: [
+          { libraryId: 'de-lib', name: 'Hörbücher' },
+          { libraryId: 'kids-lib', name: 'Kinder' },
+        ],
+      }
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    localStorage.setItem('accessToken', 'token-lib');
+    const { SettingsWidget } = await import('@/components/bookdate/SettingsWidget');
+
+    render(<SettingsWidget isOpen={true} onClose={vi.fn()} />);
+
+    const select = await screen.findByLabelText('Recommend from');
+    fireEvent.change(select, { target: { value: 'kids-lib' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+    await waitFor(() => expect(putCall(fetchMock)).toBeTruthy());
+    const body = JSON.parse(putCall(fetchMock)[1].body as string);
+    expect(body.libraryId).toBe('kids-lib');
+  });
+
   it('saves onboarding preferences and calls completion handlers', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          libraryScope: 'full',
-          favoriteBookIds: [],
-          customPrompt: '',
-          backendCapabilities: { supportsRatings: true },
-        }),
-      })
-      .mockResolvedValueOnce({ ok: true });
+    const fetchMock = routeFetch({
+      libraryScope: 'full',
+      favoriteBookIds: [],
+      customPrompt: '',
+      backendCapabilities: { supportsRatings: true },
+    });
     vi.stubGlobal('fetch', fetchMock);
     localStorage.setItem('accessToken', 'token-onboarding');
     const onClose = vi.fn();
@@ -108,9 +152,10 @@ describe('SettingsWidget', () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    const requestBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    const call = putCall(fetchMock);
+    expect(call).toBeTruthy();
+    const requestBody = JSON.parse(call[1].body as string);
     expect(requestBody.onboardingComplete).toBe(true);
     expect(requestBody.customPrompt).toBeNull();
     expect(requestBody.libraryScope).toBe('full');
@@ -125,14 +170,11 @@ describe('SettingsWidget', () => {
   });
 
   it('hides rated scope when backend does not support ratings', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        libraryScope: 'full',
-        favoriteBookIds: [],
-        customPrompt: '',
-        backendCapabilities: { supportsRatings: false },
-      }),
+    const fetchMock = routeFetch({
+      libraryScope: 'full',
+      favoriteBookIds: [],
+      customPrompt: '',
+      backendCapabilities: { supportsRatings: false },
     });
     vi.stubGlobal('fetch', fetchMock);
     localStorage.setItem('accessToken', 'token-no-ratings');
@@ -148,10 +190,7 @@ describe('SettingsWidget', () => {
   });
 
   it('shows an error when loading preferences fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      json: async () => ({}),
-    });
+    const fetchMock = routeFetch({}, { prefsOk: false });
     vi.stubGlobal('fetch', fetchMock);
     localStorage.setItem('accessToken', 'token-fail');
     const { SettingsWidget } = await import('@/components/bookdate/SettingsWidget');
@@ -162,17 +201,12 @@ describe('SettingsWidget', () => {
   });
 
   it('saves preferences and clears success message after delay', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          libraryScope: 'full',
-          favoriteBookIds: [],
-          customPrompt: '',
-          backendCapabilities: { supportsRatings: true },
-        }),
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+    const fetchMock = routeFetch({
+      libraryScope: 'full',
+      favoriteBookIds: [],
+      customPrompt: '',
+      backendCapabilities: { supportsRatings: true },
+    });
     vi.stubGlobal('fetch', fetchMock);
     localStorage.setItem('accessToken', 'token-save');
     const { SettingsWidget } = await import('@/components/bookdate/SettingsWidget');
@@ -189,7 +223,9 @@ describe('SettingsWidget', () => {
       await Promise.resolve();
     });
 
-    const requestBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    const call = putCall(fetchMock);
+    expect(call).toBeTruthy();
+    const requestBody = JSON.parse(call[1].body as string);
     expect(requestBody.customPrompt).toBe('trimmed');
     expect(requestBody.onboardingComplete).toBeUndefined();
 
