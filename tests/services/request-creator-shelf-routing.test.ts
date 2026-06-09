@@ -90,14 +90,15 @@ describe('createRequestForUser — shelf routing', () => {
   });
 
   it('honours an explicit shelf override over automatic routing', async () => {
-    // English book would auto-route to en-lib, but the user picks the kids shelf.
-    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ language: 'English', genres: [] });
+    // A German kids book auto-routes to kids-lib, but the user picks the German
+    // adult shelf instead (an upward, allowed override).
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ language: 'German', genres: ["Children's"] });
     const { createRequestForUser } = await import('@/lib/services/request-creator.service');
-    await createRequestForUser(USER, TEST_AUDIOBOOK, { bypassIgnore: true, shelfLibraryId: 'kids-lib' });
+    await createRequestForUser(USER, TEST_AUDIOBOOK, { bypassIgnore: true, shelfLibraryId: 'de-lib' });
 
     const data = createdAudiobookData();
-    expect(data.shelfLibraryId).toBe('kids-lib');
-    expect(data.shelfMediaPath).toBe('/data/media/kids/audio/audiobooks');
+    expect(data.shelfLibraryId).toBe('de-lib');
+    expect(data.shelfMediaPath).toBe('/data/media/audio/audiobooks');
   });
 
   it('falls back to auto-routing when the override matches no shelf', async () => {
@@ -107,6 +108,27 @@ describe('createRequestForUser — shelf routing', () => {
 
     const data = createdAudiobookData();
     expect(data.shelfLibraryId).toBe('de-lib'); // auto-routed, override ignored
+  });
+
+  it('blocks an override that downgrades audience (adult book -> kids shelf)', async () => {
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ language: 'German', genres: ['Roman'] });
+    const { createRequestForUser } = await import('@/lib/services/request-creator.service');
+    const result = await createRequestForUser(USER, TEST_AUDIOBOOK, { bypassIgnore: true, shelfLibraryId: 'kids-lib' });
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.reason).toBe('unsafe_audience_override');
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+  });
+
+  it('allows the downgrade override when forced (admin)', async () => {
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ language: 'German', genres: ['Roman'] });
+    const { createRequestForUser } = await import('@/lib/services/request-creator.service');
+    const result = await createRequestForUser(USER, TEST_AUDIOBOOK, {
+      bypassIgnore: true, shelfLibraryId: 'kids-lib', forceShelfOverride: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(createdAudiobookData().shelfLibraryId).toBe('kids-lib');
   });
 
   it('leaves shelf fields unset when no shelf matches the language', async () => {

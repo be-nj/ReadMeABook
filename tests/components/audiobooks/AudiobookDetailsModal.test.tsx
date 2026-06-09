@@ -210,6 +210,60 @@ describe('AudiobookDetailsModal', () => {
     );
   });
 
+  it('warns and blocks a non-admin who picks an audience downgrade (adult book -> kids shelf)', async () => {
+    useAuthMock.mockReturnValue({ user: { id: 'user-1', role: 'user' } });
+    fetchWithAuthMock.mockResolvedValue(shelfRouteResponse({
+      shelves: [
+        { libraryId: 'de-lib', label: 'Hörbücher', region: 'de', audience: 'adult', mediaPath: '/m/de', isPrimary: true },
+        { libraryId: 'kids-lib', label: 'Kinder', region: 'de', audience: 'kids', mediaPath: '/m/kids', isPrimary: false },
+      ],
+      resolved: { libraryId: 'de-lib', mediaPath: '/m/de' },
+      audience: 'adult',
+    }));
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    const select = screen.getByLabelText('File into library') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'kids-lib' } });
+
+    expect(screen.getByText(/not recommended/i)).toBeInTheDocument();
+    expect(screen.getByText(/Only an admin can override/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Request Audiobook' })).toBeDisabled();
+  });
+
+  it('lets an admin force the downgrade via the checkbox', async () => {
+    useAuthMock.mockReturnValue({ user: { id: 'admin-1', role: 'admin' } });
+    fetchWithAuthMock.mockResolvedValue(shelfRouteResponse({
+      shelves: [
+        { libraryId: 'de-lib', label: 'Hörbücher', region: 'de', audience: 'adult', mediaPath: '/m/de', isPrimary: true },
+        { libraryId: 'kids-lib', label: 'Kinder', region: 'de', audience: 'kids', mediaPath: '/m/kids', isPrimary: false },
+      ],
+      resolved: { libraryId: 'de-lib', mediaPath: '/m/de' },
+      audience: 'adult',
+    }));
+    createRequestMock.mockResolvedValueOnce(undefined);
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    fireEvent.change(screen.getByLabelText('File into library'), { target: { value: 'kids-lib' } });
+    // Blocked until forced.
+    expect(screen.getByRole('button', { name: 'Request Audiobook' })).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText(/Force this anyway/i));
+    expect(screen.getByRole('button', { name: 'Request Audiobook' })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Request Audiobook' }));
+    const p = createRequestMock.mock.results[0]?.value;
+    await act(async () => { await p; });
+
+    expect(createRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ asin: 'ASIN123' }),
+      { shelfLibraryId: 'kids-lib', forceShelfOverride: true }
+    );
+  });
+
   it('hides the dropdown when only one shelf is configured', async () => {
     fetchWithAuthMock.mockResolvedValue(shelfRouteResponse({
       shelves: [{ libraryId: 'en-lib', label: 'Audiobooks', region: 'us', audience: 'adult', mediaPath: '/m/en', isPrimary: true }],

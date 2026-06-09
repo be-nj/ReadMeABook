@@ -21,6 +21,16 @@ import { AUDIBLE_REGIONS, type AudibleRegion } from '@/lib/types/audible';
 const AUDIENCE_ORDER: Record<ShelfAudience, number> = { kids: 0, teen: 1, adult: 2 };
 
 /**
+ * Whether filing a book of `bookAudience` into a shelf of `shelfAudience` is a
+ * downgrade — i.e. the shelf targets a *younger* audience than the book (e.g. an
+ * adult title into a kids shelf). Used to gate manual overrides (admin-only with
+ * a forced confirm). Same-tier or upward (kids book → adult shelf) is fine.
+ */
+export function isAudienceDowngrade(bookAudience: ShelfAudience, shelfAudience: ShelfAudience): boolean {
+  return AUDIENCE_ORDER[shelfAudience] < AUDIENCE_ORDER[bookAudience];
+}
+
+/**
  * The language a shelf routes for. Prefer its explicit language, but fall back
  * to the language implied by its Audible region (region → language is 1:1), so a
  * shelf configured by region alone (e.g. an older config where `language` was

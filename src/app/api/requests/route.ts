@@ -27,6 +27,8 @@ const CreateRequestSchema = z.object({
   }),
   /** Optional shelf (library) override from the request dialog. */
   shelfLibraryId: z.string().optional(),
+  /** Admin-only: force an override even when it downgrades the audience. */
+  forceShelfOverride: z.boolean().optional(),
 });
 
 /**
@@ -44,9 +46,11 @@ export async function POST(request: NextRequest) {
       }
 
       const body = await req.json();
-      const { audiobook, shelfLibraryId } = CreateRequestSchema.parse(body);
+      const { audiobook, shelfLibraryId, forceShelfOverride } = CreateRequestSchema.parse(body);
 
       const skipAutoSearch = req.nextUrl.searchParams.get('skipAutoSearch') === 'true';
+      // Forcing an audience downgrade is admin-only; ignore the flag otherwise.
+      const isAdmin = req.user.role === 'admin';
 
       const result = await createRequestForUser(req.user.id, {
         asin: audiobook.asin,
@@ -55,7 +59,7 @@ export async function POST(request: NextRequest) {
         narrator: audiobook.narrator,
         description: audiobook.description,
         coverArtUrl: audiobook.coverArtUrl,
-      }, { skipAutoSearch, bypassIgnore: true, shelfLibraryId });
+      }, { skipAutoSearch, bypassIgnore: true, shelfLibraryId, forceShelfOverride: forceShelfOverride === true && isAdmin });
 
       if (!result.success) {
         const statusMap: Record<string, { error: string; status: number }> = {
@@ -64,6 +68,7 @@ export async function POST(request: NextRequest) {
           duplicate: { error: 'DuplicateRequest', status: 409 },
           user_not_found: { error: 'UserNotFound', status: 404 },
           ignored: { error: 'Ignored', status: 409 },
+          unsafe_audience_override: { error: 'UnsafeAudienceOverride', status: 409 },
         };
         const mapped = statusMap[result.reason] || { error: 'RequestError', status: 500 };
         return NextResponse.json(

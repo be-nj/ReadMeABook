@@ -15,9 +15,14 @@ const jobQueueMock = vi.hoisted(() => ({
   addNotificationJob: vi.fn(() => Promise.resolve()),
 }));
 const findPlexMatchMock = vi.hoisted(() => vi.fn());
+const getShelvesMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])));
 
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
+}));
+
+vi.mock('@/lib/services/config.service', () => ({
+  getConfigService: () => ({ get: vi.fn().mockResolvedValue(null), getShelves: getShelvesMock }),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -196,6 +201,60 @@ describe('Requests API routes', () => {
       expect.objectContaining({
         data: expect.objectContaining({ status: 'awaiting_search' }),
       })
+    );
+  });
+
+  it('blocks a non-admin audience downgrade override even with force (force is stripped)', async () => {
+    getShelvesMock.mockResolvedValueOnce([
+      { libraryId: 'kids-lib', language: 'de', audience: 'kids', region: 'de', mediaPath: '/m/kids', isPrimary: false },
+      { libraryId: 'de-lib', language: 'de', audience: 'adult', region: 'de', mediaPath: '/m/de', isPrimary: true },
+    ]);
+    findPlexMatchMock.mockResolvedValueOnce(null);
+    prismaMock.request.findFirst.mockResolvedValueOnce(null);
+    authRequest.user = { id: 'user-1', role: 'user' };
+    authRequest.json.mockResolvedValue({
+      audiobook: { asin: 'ASIN-DG', title: 'Adult Book', author: 'Author' },
+      shelfLibraryId: 'kids-lib',
+      forceShelfOverride: true, // non-admin -> route must strip this
+    });
+
+    const { POST } = await import('@/app/api/requests/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('UnsafeAudienceOverride');
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+  });
+
+  it('allows an admin to force an audience downgrade override', async () => {
+    getShelvesMock.mockResolvedValueOnce([
+      { libraryId: 'kids-lib', language: 'de', audience: 'kids', region: 'de', mediaPath: '/m/kids', isPrimary: false },
+      { libraryId: 'de-lib', language: 'de', audience: 'adult', region: 'de', mediaPath: '/m/de', isPrimary: true },
+    ]);
+    findPlexMatchMock.mockResolvedValueOnce(null);
+    prismaMock.request.findFirst.mockResolvedValue(null);
+    prismaMock.audiobook.findFirst.mockResolvedValueOnce(null);
+    prismaMock.audiobook.create.mockResolvedValueOnce({ id: 'ab-dg', title: 'Adult Book', author: 'Author', audibleAsin: 'ASIN-DG2' });
+    prismaMock.user.findUnique.mockResolvedValueOnce({ id: 'admin-1', role: 'admin', autoApproveRequests: true, plexUsername: 'admin' } as any);
+    prismaMock.request.create.mockResolvedValueOnce({
+      id: 'req-dg', status: 'pending',
+      audiobook: { id: 'ab-dg', title: 'Adult Book', author: 'Author', audibleAsin: 'ASIN-DG2' },
+      user: { id: 'admin-1', plexUsername: 'admin' },
+    } as any);
+    authRequest.user = { id: 'admin-1', role: 'admin' };
+    authRequest.json.mockResolvedValue({
+      audiobook: { asin: 'ASIN-DG2', title: 'Adult Book', author: 'Author' },
+      shelfLibraryId: 'kids-lib',
+      forceShelfOverride: true,
+    });
+
+    const { POST } = await import('@/app/api/requests/route');
+    const response = await POST({} as any);
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ shelfLibraryId: 'kids-lib' }) })
     );
   });
 

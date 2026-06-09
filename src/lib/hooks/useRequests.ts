@@ -176,7 +176,7 @@ export function useCreateRequest() {
 
   const createRequest = async (
     audiobook: Audiobook,
-    options?: { skipAutoSearch?: boolean; shelfLibraryId?: string }
+    options?: { skipAutoSearch?: boolean; shelfLibraryId?: string; forceShelfOverride?: boolean }
   ) => {
     if (!accessToken) {
       throw new Error('Not authenticated');
@@ -195,6 +195,7 @@ export function useCreateRequest() {
         body: JSON.stringify({
           audiobook,
           ...(options?.shelfLibraryId ? { shelfLibraryId: options.shelfLibraryId } : {}),
+          ...(options?.forceShelfOverride ? { forceShelfOverride: true } : {}),
         }),
       });
 

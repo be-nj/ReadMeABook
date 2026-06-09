@@ -114,6 +114,21 @@ export function AudiobookDetailsModal({
   const [shelfOptions, setShelfOptions] = useState<ShelfOption[]>([]);
   const [shelfReason, setShelfReason] = useState<string | null>(null);
   const [selectedShelf, setSelectedShelf] = useState<string>('');
+  // Detected audience of the book itself (from the routing preview) + admin force.
+  const [bookAudience, setBookAudience] = useState<string>('adult');
+  const [forceOverride, setForceOverride] = useState(false);
+
+  // Audience tiers: filing into a shelf for a younger audience than the book is
+  // a "downgrade" (e.g. an adult title into a kids library) — blocked unless an
+  // admin forces it.
+  const AUDIENCE_RANK: Record<string, number> = { kids: 0, teen: 1, adult: 2 };
+  const selectedShelfAudience = shelfOptions.find((s) => s.libraryId === selectedShelf)?.audience;
+  const isDowngrade =
+    !!selectedShelfAudience &&
+    AUDIENCE_RANK[selectedShelfAudience] < (AUDIENCE_RANK[bookAudience] ?? 2);
+  const isAdmin = user?.role === 'admin';
+  // Block the request when a non-admin picks a downgrade, or an admin hasn't forced it.
+  const downgradeBlocked = isDowngrade && (!isAdmin || !forceOverride);
 
   // Sync local status when the prop changes (e.g. page data refreshes)
   useEffect(() => {
@@ -142,6 +157,8 @@ export function AudiobookDetailsModal({
         const opts: ShelfOption[] = data.shelves || [];
         setShelfOptions(opts.length > 1 ? opts : []);
         setShelfReason(data.reason ?? null);
+        setBookAudience(data.audience || 'adult');
+        setForceOverride(false);
         // Default selection: the auto-resolved shelf, else the primary, else none.
         const resolvedId: string =
           data.resolved?.libraryId || opts.find((s) => s.isPrimary)?.libraryId || '';
@@ -186,7 +203,9 @@ export function AudiobookDetailsModal({
     try {
       await createRequest(
         audiobook,
-        selectedShelf ? { shelfLibraryId: selectedShelf } : undefined
+        selectedShelf
+          ? { shelfLibraryId: selectedShelf, ...(isDowngrade && isAdmin && forceOverride ? { forceShelfOverride: true } : {}) }
+          : undefined
       );
       setLocalRequestStatus('pending');
       onStatusChange?.('pending');
@@ -704,6 +723,29 @@ export function AudiobookDetailsModal({
                     No automatic match — please choose where to file this book.
                   </p>
                 )}
+                {isDowngrade && (
+                  <div className="mt-2 rounded-lg border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      This looks like a <strong>{bookAudience}</strong> title — filing it into a{' '}
+                      <strong>{selectedShelfAudience}</strong> library is not recommended.
+                    </p>
+                    {isAdmin ? (
+                      <label className="mt-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={forceOverride}
+                          onChange={(e) => setForceOverride(e.target.checked)}
+                          className="rounded border-amber-400 dark:border-amber-600"
+                        />
+                        Force this anyway (admin)
+                      </label>
+                    ) : (
+                      <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                        Only an admin can override this.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -720,7 +762,7 @@ export function AudiobookDetailsModal({
                 ) : status.canRequest ? (
                   <button
                     onClick={handleRequest}
-                    disabled={isRequesting || !user}
+                    disabled={isRequesting || !user || downgradeBlocked}
                     className="w-full py-3 px-4 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isRequesting ? (

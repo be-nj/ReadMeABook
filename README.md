@@ -32,7 +32,7 @@
 > - **Owned across all libraries** — ownership is detected across every enabled Audiobookshelf library, not just one.
 > - **Language/audience routing** — requests are filed into the matching library by language and audience (audience falls back upward only).
 > - **Per-shelf Audible region** + a **region switch in search** (browse the German vs. English store).
-> - **Per-request override** — the request dialog shows the resolved target library and lets you change it.
+> - **Per-request override** — the request dialog shows the resolved target library and lets you change it; downgrading the audience (e.g. an adult title into a kids library) is admin-only and gated behind a warning.
 >
 > Strictly backwards compatible: a single-library setup behaves exactly as upstream and is migrated automatically. See [Multi-library shelves](#-multi-library-shelves) for details. Fork-only items are marked **🔱** throughout this README.
 
@@ -75,6 +75,12 @@ if it's in any of them). When you request a book, it's **routed** to the matchin
 shelf by language and audience — audience only ever falls back *upward* (a kids
 title is never filed into an adult-only shelf, and vice-versa). The request
 dialog shows the resolved target library and lets you **override** it per request.
+
+**Kids-safety:** filing a book into a library for a *younger* audience than the
+book itself (e.g. an adult title into a kids library) is **blocked** — only an
+admin can force it, after an explicit warning. This applies to manual overrides;
+automatic routing never downgrades on its own.
+
 Searches are **region-aware**: the search bar has a region switch (defaulting to
 your primary shelf) so you can browse the German or the English Audible store.
 

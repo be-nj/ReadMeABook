@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { selectShelf, normalizeLanguage, guessAudience } from '@/lib/utils/shelf-router';
+import { selectShelf, normalizeLanguage, guessAudience, isAudienceDowngrade } from '@/lib/utils/shelf-router';
 import type { Shelf, ShelfAudience } from '@/lib/services/config.service';
 
 const shelf = (
@@ -90,6 +90,20 @@ describe('shelf-router', () => {
       const b = shelf('b', 'en', 'adult', true);
       const r = selectShelf({ language: 'en', genres: [] }, [a, b]);
       expect(r.shelf).toBe(b);
+    });
+  });
+
+  describe('isAudienceDowngrade', () => {
+    it('flags filing a book into a younger-audience shelf', () => {
+      expect(isAudienceDowngrade('adult', 'kids')).toBe(true);
+      expect(isAudienceDowngrade('adult', 'teen')).toBe(true);
+      expect(isAudienceDowngrade('teen', 'kids')).toBe(true);
+    });
+    it('allows same-tier and upward placement', () => {
+      expect(isAudienceDowngrade('adult', 'adult')).toBe(false);
+      expect(isAudienceDowngrade('kids', 'adult')).toBe(false);
+      expect(isAudienceDowngrade('kids', 'teen')).toBe(false);
+      expect(isAudienceDowngrade('teen', 'teen')).toBe(false);
     });
   });
 

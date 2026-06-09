@@ -15,7 +15,7 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
-import { selectShelf } from '@/lib/utils/shelf-router';
+import { selectShelf, guessAudience, isAudienceDowngrade } from '@/lib/utils/shelf-router';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -38,11 +38,27 @@ export interface CreateRequestOptions {
    * shelf's media path + library id win. Ignored if it matches no shelf.
    */
   shelfLibraryId?: string;
+  /**
+   * Allow an override that files a book into a shelf for a *younger* audience
+   * than the book itself (e.g. an adult title into a kids library). Admin-only;
+   * the API route must verify the caller is an admin before passing this.
+   */
+  forceShelfOverride?: boolean;
 }
 
 export type CreateRequestResult =
   | { success: true; request: any }
-  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored'; message: string };
+  | {
+      success: false;
+      reason:
+        | 'already_available'
+        | 'being_processed'
+        | 'duplicate'
+        | 'user_not_found'
+        | 'ignored'
+        | 'unsafe_audience_override';
+      message: string;
+    };
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
@@ -53,7 +69,7 @@ export async function createRequestForUser(
   audiobook: CreateRequestInput,
   options: CreateRequestOptions = {}
 ): Promise<CreateRequestResult> {
-  const { skipAutoSearch = false, bypassIgnore = false, shelfLibraryId: shelfOverride } = options;
+  const { skipAutoSearch = false, bypassIgnore = false, shelfLibraryId: shelfOverride, forceShelfOverride = false } = options;
 
   // Check for existing active request (downloaded/available) for this ASIN
   const existingActiveRequest = await prisma.request.findFirst({
@@ -144,32 +160,47 @@ export async function createRequestForUser(
   // to the global media_dir downstream when no shelf matches.
   let shelfMediaPath: string | null = null;
   let shelfLibraryId: string | null = null;
+
+  // Load shelves (best-effort; routing is optional).
+  let shelves: Awaited<ReturnType<ReturnType<typeof getConfigService>['getShelves']>> = [];
   try {
-    const shelves = await getConfigService().getShelves();
-    if (shelves.length > 0) {
-      // An explicit override (from the request dialog) wins over auto-routing.
-      const overridden = shelfOverride
-        ? shelves.find((s) => s.libraryId === shelfOverride)
-        : undefined;
-      if (overridden) {
-        shelfMediaPath = overridden.mediaPath || null;
-        shelfLibraryId = overridden.libraryId || null;
-        logger.info(`Shelf override for "${audiobook.title}" -> library ${shelfLibraryId}`);
-      } else {
-        if (shelfOverride) {
-          logger.warn(`Shelf override "${shelfOverride}" matched no configured shelf; falling back to auto-routing`);
-        }
-        const route = selectShelf({ language: bookLanguage, genres: bookGenres }, shelves);
-        if (route.shelf) {
-          shelfMediaPath = route.shelf.mediaPath || null;
-          shelfLibraryId = route.shelf.libraryId || null;
-        } else {
-          logger.info(`No shelf auto-matched for "${audiobook.title}" (${route.reason}); will use default media path`);
-        }
-      }
-    }
+    shelves = await getConfigService().getShelves();
   } catch (error) {
     logger.warn(`Shelf routing failed for ASIN ${audiobook.asin}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+
+  if (shelves.length > 0) {
+    // An explicit override (from the request dialog) wins over auto-routing.
+    const overridden = shelfOverride
+      ? shelves.find((s) => s.libraryId === shelfOverride)
+      : undefined;
+    if (overridden) {
+      // Guard: never let a manual override file a book into a shelf for a
+      // younger audience than the book itself (e.g. an adult title into a kids
+      // library) unless an admin explicitly forces it.
+      const bookAudience = guessAudience(bookGenres);
+      if (isAudienceDowngrade(bookAudience, overridden.audience) && !forceShelfOverride) {
+        return {
+          success: false,
+          reason: 'unsafe_audience_override',
+          message: `"${audiobook.title}" looks like a ${bookAudience} title; filing it into a ${overridden.audience} library is blocked. An admin can force this.`,
+        };
+      }
+      shelfMediaPath = overridden.mediaPath || null;
+      shelfLibraryId = overridden.libraryId || null;
+      logger.info(`Shelf override for "${audiobook.title}" -> library ${shelfLibraryId}${forceShelfOverride ? ' (forced)' : ''}`);
+    } else {
+      if (shelfOverride) {
+        logger.warn(`Shelf override "${shelfOverride}" matched no configured shelf; falling back to auto-routing`);
+      }
+      const route = selectShelf({ language: bookLanguage, genres: bookGenres }, shelves);
+      if (route.shelf) {
+        shelfMediaPath = route.shelf.mediaPath || null;
+        shelfLibraryId = route.shelf.libraryId || null;
+      } else {
+        logger.info(`No shelf auto-matched for "${audiobook.title}" (${route.reason}); will use default media path`);
+      }
+    }
   }
 
   // Find or create audiobook record
