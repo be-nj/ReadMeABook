@@ -437,6 +437,45 @@ describe('file organizer', () => {
   // handled as first-class requests through the job queue, not inline during
   // file organization. See organize-files.processor.ts createEbookRequestIfEnabled().
 
+  describe('resolveExistingPath (trailing space/dot from download clients)', () => {
+    const ENOENT = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+
+    it('returns the path unchanged when it exists', async () => {
+      const organizer = new FileOrganizer('/media', '/tmp');
+      fsMock.stat.mockResolvedValueOnce({ isFile: () => false });
+      const r = await (organizer as any).resolveExistingPath('/data/download/bittorrent/Book');
+      expect(r).toBe('/data/download/bittorrent/Book');
+    });
+
+    it('falls back to the trailing-space-trimmed path when the reported one is missing', async () => {
+      const organizer = new FileOrganizer('/media', '/tmp');
+      // 1st stat (reported, with trailing space) -> ENOENT; 2nd stat (trimmed) -> ok
+      fsMock.stat
+        .mockRejectedValueOnce(ENOENT)
+        .mockResolvedValueOnce({ isFile: () => false });
+      const r = await (organizer as any).resolveExistingPath('/data/download/bittorrent/My Sister, the Serial Killer ');
+      expect(r).toBe('/data/download/bittorrent/My Sister, the Serial Killer');
+    });
+
+    it('falls back to a sibling whose trimmed name matches', async () => {
+      const organizer = new FileOrganizer('/media', '/tmp');
+      // reported path ENOENT, trimmed also ENOENT, then readdir sibling match
+      fsMock.stat.mockRejectedValueOnce(ENOENT).mockRejectedValueOnce(ENOENT);
+      fsMock.readdir.mockResolvedValueOnce(['Other Book', 'My Sister, the Serial Killer']);
+      const r = await (organizer as any).resolveExistingPath('/data/download/bittorrent/My Sister, the Serial Killer ');
+      expect(r).toBe(path.join('/data/download/bittorrent', 'My Sister, the Serial Killer'));
+    });
+
+    it('returns the original path when nothing matches (caller surfaces ENOENT)', async () => {
+      const organizer = new FileOrganizer('/media', '/tmp');
+      fsMock.stat.mockRejectedValueOnce(ENOENT).mockRejectedValueOnce(ENOENT);
+      fsMock.readdir.mockResolvedValueOnce(['Unrelated']);
+      const original = '/data/download/bittorrent/Missing Book ';
+      const r = await (organizer as any).resolveExistingPath(original);
+      expect(r).toBe(original);
+    });
+  });
+
   it('finds audio files and cover art in nested folders', async () => {
     const organizer = new FileOrganizer('/media', '/tmp');
 

@@ -98,6 +98,13 @@ export class FileOrganizer {
     };
 
     try {
+      // Resolve the real on-disk path first: download clients may report a name
+      // with a trailing space/dot that the filesystem stripped when creating it.
+      const resolvedPath = await this.resolveExistingPath(downloadPath);
+      if (resolvedPath !== downloadPath) {
+        await logger?.info(`Resolved download path "${downloadPath}" -> "${resolvedPath}"`);
+        downloadPath = resolvedPath;
+      }
       await logger?.info(`Organizing: ${downloadPath}`);
 
       // Find audiobook files
@@ -519,6 +526,48 @@ export class FileOrganizer {
       result.errors.push(error instanceof Error ? error.message : 'Unknown error');
       return result;
     }
+  }
+
+  /**
+   * Resolve a download path to the entry that actually exists on disk.
+   *
+   * Download clients report a torrent's name verbatim, but many filesystems
+   * (and SMB/CIFS) silently strip trailing whitespace and dots when creating the
+   * directory — so a torrent named "Book " lands in "Book". When the reported
+   * path is missing, fall back to: (1) the trailing-whitespace/dot-trimmed path,
+   * then (2) a sibling in the parent dir whose trimmed name matches. Returns the
+   * original path unchanged when nothing better is found (the caller surfaces the
+   * original ENOENT).
+   */
+  private async resolveExistingPath(p: string): Promise<string> {
+    try {
+      await fs.stat(p);
+      return p;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+    }
+    const stripTrailing = (s: string) => s.replace(/[\s.]+$/, '');
+    const trimmed = stripTrailing(p);
+    if (trimmed !== p && trimmed.length > 0) {
+      try {
+        await fs.stat(trimmed);
+        return trimmed;
+      } catch {
+        // fall through to sibling match
+      }
+    }
+    const parent = path.dirname(p);
+    const wanted = stripTrailing(path.basename(p)).toLowerCase();
+    if (wanted.length > 0) {
+      try {
+        const entries = await fs.readdir(parent);
+        const hit = entries.find((e) => stripTrailing(e).toLowerCase() === wanted);
+        if (hit) return path.join(parent, hit);
+      } catch {
+        // parent unreadable — give up
+      }
+    }
+    return p;
   }
 
   /**
