@@ -174,7 +174,10 @@ export function useCreateRequest() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const createRequest = async (audiobook: Audiobook, options?: { skipAutoSearch?: boolean }) => {
+  const createRequest = async (
+    audiobook: Audiobook,
+    options?: { skipAutoSearch?: boolean; shelfLibraryId?: string }
+  ) => {
     if (!accessToken) {
       throw new Error('Not authenticated');
     }
@@ -189,7 +192,10 @@ export function useCreateRequest() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ audiobook }),
+        body: JSON.stringify({
+          audiobook,
+          ...(options?.shelfLibraryId ? { shelfLibraryId: options.shelfLibraryId } : {}),
+        }),
       });
 
       const data = await response.json();

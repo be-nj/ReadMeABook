@@ -25,6 +25,8 @@ const CreateRequestSchema = z.object({
     releaseDate: z.string().optional(),
     rating: z.number().nullable().optional(),
   }),
+  /** Optional shelf (library) override from the request dialog. */
+  shelfLibraryId: z.string().optional(),
 });
 
 /**
@@ -42,7 +44,7 @@ export async function POST(request: NextRequest) {
       }
 
       const body = await req.json();
-      const { audiobook } = CreateRequestSchema.parse(body);
+      const { audiobook, shelfLibraryId } = CreateRequestSchema.parse(body);
 
       const skipAutoSearch = req.nextUrl.searchParams.get('skipAutoSearch') === 'true';
 
@@ -53,7 +55,7 @@ export async function POST(request: NextRequest) {
         narrator: audiobook.narrator,
         description: audiobook.description,
         coverArtUrl: audiobook.coverArtUrl,
-      }, { skipAutoSearch, bypassIgnore: true });
+      }, { skipAutoSearch, bypassIgnore: true, shelfLibraryId });
 
       if (!result.success) {
         const statusMap: Record<string, { error: string; status: number }> = {

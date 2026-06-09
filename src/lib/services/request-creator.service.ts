@@ -32,6 +32,12 @@ export interface CreateRequestOptions {
   skipAutoSearch?: boolean;
   /** When true, skip the per-user ignore list check (used for manual requests) */
   bypassIgnore?: boolean;
+  /**
+   * Explicit shelf (library) to file this request into, overriding automatic
+   * language/audience routing. When set and it matches a configured shelf, that
+   * shelf's media path + library id win. Ignored if it matches no shelf.
+   */
+  shelfLibraryId?: string;
 }
 
 export type CreateRequestResult =
@@ -47,7 +53,7 @@ export async function createRequestForUser(
   audiobook: CreateRequestInput,
   options: CreateRequestOptions = {}
 ): Promise<CreateRequestResult> {
-  const { skipAutoSearch = false, bypassIgnore = false } = options;
+  const { skipAutoSearch = false, bypassIgnore = false, shelfLibraryId: shelfOverride } = options;
 
   // Check for existing active request (downloaded/available) for this ASIN
   const existingActiveRequest = await prisma.request.findFirst({
@@ -141,12 +147,25 @@ export async function createRequestForUser(
   try {
     const shelves = await getConfigService().getShelves();
     if (shelves.length > 0) {
-      const route = selectShelf({ language: bookLanguage, genres: bookGenres }, shelves);
-      if (route.shelf) {
-        shelfMediaPath = route.shelf.mediaPath || null;
-        shelfLibraryId = route.shelf.libraryId || null;
+      // An explicit override (from the request dialog) wins over auto-routing.
+      const overridden = shelfOverride
+        ? shelves.find((s) => s.libraryId === shelfOverride)
+        : undefined;
+      if (overridden) {
+        shelfMediaPath = overridden.mediaPath || null;
+        shelfLibraryId = overridden.libraryId || null;
+        logger.info(`Shelf override for "${audiobook.title}" -> library ${shelfLibraryId}`);
       } else {
-        logger.info(`No shelf auto-matched for "${audiobook.title}" (${route.reason}); will use default media path`);
+        if (shelfOverride) {
+          logger.warn(`Shelf override "${shelfOverride}" matched no configured shelf; falling back to auto-routing`);
+        }
+        const route = selectShelf({ language: bookLanguage, genres: bookGenres }, shelves);
+        if (route.shelf) {
+          shelfMediaPath = route.shelf.mediaPath || null;
+          shelfLibraryId = route.shelf.libraryId || null;
+        } else {
+          logger.info(`No shelf auto-matched for "${audiobook.title}" (${route.reason}); will use default media path`);
+        }
       }
     }
   } catch (error) {

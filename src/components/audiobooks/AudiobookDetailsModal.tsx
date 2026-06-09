@@ -109,6 +109,12 @@ export function AudiobookDetailsModal({
   const [coverError, setCoverError] = useState(false);
   const [isTogglingIgnore, setIsTogglingIgnore] = useState(false);
 
+  // Multi-library shelf routing preview + override for the request dialog.
+  type ShelfOption = { libraryId: string; label: string; region: string; audience: string; mediaPath: string; isPrimary: boolean };
+  const [shelfOptions, setShelfOptions] = useState<ShelfOption[]>([]);
+  const [shelfReason, setShelfReason] = useState<string | null>(null);
+  const [selectedShelf, setSelectedShelf] = useState<string>('');
+
   // Sync local status when the prop changes (e.g. page data refreshes)
   useEffect(() => {
     setLocalRequestStatus(requestStatus ?? null);
@@ -117,6 +123,37 @@ export function AudiobookDetailsModal({
   const effectiveStatus = localRequestStatus;
   const status = getStatusInfo(isAvailable, effectiveStatus, requestedByUsername);
   const canShowEbookButtons = isAvailable && ebookStatus?.ebookSourcesEnabled && !ebookStatus?.hasActiveEbookRequest;
+
+  // Load the shelf-routing preview when the request action is available, so the
+  // dialog can show where the book will be filed and offer an override. Only
+  // shown when more than one shelf is configured (single shelf = nothing to pick).
+  useEffect(() => {
+    if (!isOpen || !asin || !status.canRequest || hideRequestActions) {
+      setShelfOptions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/audiobooks/${asin}/shelf-route`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const opts: ShelfOption[] = data.shelves || [];
+        setShelfOptions(opts.length > 1 ? opts : []);
+        setShelfReason(data.reason ?? null);
+        // Default selection: the auto-resolved shelf, else the primary, else none.
+        const resolvedId: string =
+          data.resolved?.libraryId || opts.find((s) => s.isPrimary)?.libraryId || '';
+        setSelectedShelf(resolvedId);
+      } catch {
+        // Non-fatal: the request still works with automatic routing.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, asin, status.canRequest, hideRequestActions]);
 
   useEffect(() => {
     setMounted(true);
@@ -147,7 +184,10 @@ export function AudiobookDetailsModal({
     }
 
     try {
-      await createRequest(audiobook);
+      await createRequest(
+        audiobook,
+        selectedShelf ? { shelfLibraryId: selectedShelf } : undefined
+      );
       setLocalRequestStatus('pending');
       onStatusChange?.('pending');
       showNotification('Request created!');
@@ -646,21 +686,54 @@ export function AudiobookDetailsModal({
                     In Your Library
                   </button>
                 ) : status.canRequest ? (
-                  <button
-                    onClick={handleRequest}
-                    disabled={isRequesting || !user}
-                    className="w-full py-3 px-4 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isRequesting ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        Requesting...
-                      </span>
-                    ) : !user ? 'Sign in to Request' : 'Request Audiobook'}
-                  </button>
+                  <>
+                    {user && shelfOptions.length > 0 && (
+                      <div className="mb-3">
+                        <label
+                          htmlFor="shelf-route-select"
+                          className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1"
+                        >
+                          File into library
+                        </label>
+                        <select
+                          id="shelf-route-select"
+                          aria-label="File into library"
+                          value={selectedShelf}
+                          onChange={(e) => setSelectedShelf(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          {shelfReason && (
+                            <option value="">Select a library…</option>
+                          )}
+                          {shelfOptions.map((s) => (
+                            <option key={s.libraryId} value={s.libraryId}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                        {shelfReason && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                            No automatic match — please choose where to file this book.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <button
+                      onClick={handleRequest}
+                      disabled={isRequesting || !user}
+                      className="w-full py-3 px-4 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isRequesting ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          Requesting...
+                        </span>
+                      ) : !user ? 'Sign in to Request' : 'Request Audiobook'}
+                    </button>
+                  </>
                 ) : (
                   <button
                     disabled

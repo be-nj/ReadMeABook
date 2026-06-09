@@ -14,6 +14,12 @@ const useAudiobookDetailsMock = vi.hoisted(() => vi.fn());
 const createRequestMock = vi.hoisted(() => vi.fn());
 const fetchEbookMock = vi.hoisted(() => vi.fn());
 const revalidateEbookStatusMock = vi.hoisted(() => vi.fn());
+const fetchWithAuthMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/utils/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils/api')>()),
+  fetchWithAuth: (url: string, opts?: any) => fetchWithAuthMock(url, opts),
+}));
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => useAuthMock(),
@@ -68,11 +74,33 @@ describe('AudiobookDetailsModal', () => {
       error: null,
     });
     createRequestMock.mockReset();
+    // Default: shelf-route preview returns nothing notable (single/no shelves) so
+    // the dropdown stays hidden for tests that don't care about it.
+    fetchWithAuthMock.mockReset();
+    fetchWithAuthMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ shelves: [], resolved: null, reason: null, language: '', audience: 'adult' }),
+    });
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
       },
     });
+  });
+
+  const shelfRouteResponse = (overrides: any = {}) => ({
+    ok: true,
+    json: async () => ({
+      shelves: [
+        { libraryId: 'en-lib', label: 'Audiobooks', region: 'us', audience: 'adult', mediaPath: '/m/en', isPrimary: true },
+        { libraryId: 'de-lib', label: 'Hörbücher', region: 'de', audience: 'adult', mediaPath: '/m/de', isPrimary: false },
+      ],
+      resolved: { libraryId: 'de-lib', mediaPath: '/m/de' },
+      reason: null,
+      language: 'de',
+      audience: 'adult',
+      ...overrides,
+    }),
   });
 
   afterEach(() => {
@@ -155,6 +183,44 @@ describe('AudiobookDetailsModal', () => {
     });
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('ASIN123');
+  });
+
+  it('shows the shelf dropdown defaulted to the resolved shelf and sends the override', async () => {
+    fetchWithAuthMock.mockResolvedValue(shelfRouteResponse());
+    createRequestMock.mockResolvedValueOnce(undefined);
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    const select = screen.getByLabelText('File into library') as HTMLSelectElement;
+    // Default = the auto-resolved shelf (German).
+    expect(select.value).toBe('de-lib');
+
+    // User overrides to the English library.
+    fireEvent.change(select, { target: { value: 'en-lib' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Request Audiobook' }));
+
+    const requestPromise = createRequestMock.mock.results[0]?.value;
+    await act(async () => { await requestPromise; });
+
+    expect(createRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ asin: 'ASIN123' }),
+      { shelfLibraryId: 'en-lib' }
+    );
+  });
+
+  it('hides the dropdown when only one shelf is configured', async () => {
+    fetchWithAuthMock.mockResolvedValue(shelfRouteResponse({
+      shelves: [{ libraryId: 'en-lib', label: 'Audiobooks', region: 'us', audience: 'adult', mediaPath: '/m/en', isPrimary: true }],
+      resolved: { libraryId: 'en-lib', mediaPath: '/m/en' },
+    }));
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    expect(screen.queryByLabelText('File into library')).not.toBeInTheDocument();
   });
 
   it('shows an error state when details fail to load', async () => {
