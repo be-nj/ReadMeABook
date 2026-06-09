@@ -7,6 +7,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { AUDIBLE_REGIONS } from '@/lib/types/audible';
+
+/** Language implied by an Audible region (region → language is 1:1), or ''. */
+function languageForRegion(region: string): string {
+  return (AUDIBLE_REGIONS as Record<string, { language?: string }>)[region]?.language || '';
+}
 
 const logger = RMABLogger.create('API.Admin.Settings');
 
@@ -50,17 +56,23 @@ function parseShelves(configMap: Map<string, string | null>): LoadedShelf[] {
       if (Array.isArray(parsed)) {
         const shelves: LoadedShelf[] = parsed
           .filter((s) => s && typeof s.libraryId === 'string' && s.libraryId.length > 0)
-          .map((s) => ({
-            libraryId: s.libraryId as string,
-            region: typeof s.region === 'string' ? s.region : '',
-            language: typeof s.language === 'string' ? s.language : '',
-            audience:
-              s.audience === 'kids' || s.audience === 'teen' || s.audience === 'adult'
-                ? s.audience
-                : 'adult',
-            mediaPath: typeof s.mediaPath === 'string' ? s.mediaPath : '',
-            isPrimary: s.isPrimary === true,
-          }));
+          .map((s) => {
+            const region = typeof s.region === 'string' ? s.region : '';
+            return {
+              libraryId: s.libraryId as string,
+              region,
+              language:
+                typeof s.language === 'string' && s.language.length > 0
+                  ? s.language
+                  : languageForRegion(region),
+              audience:
+                s.audience === 'kids' || s.audience === 'teen' || s.audience === 'adult'
+                  ? s.audience
+                  : 'adult',
+              mediaPath: typeof s.mediaPath === 'string' ? s.mediaPath : '',
+              isPrimary: s.isPrimary === true,
+            };
+          });
         if (shelves.length > 0) {
           if (!shelves.some((s) => s.isPrimary)) shelves[0].isPrimary = true;
           return shelves;

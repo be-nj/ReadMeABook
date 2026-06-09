@@ -36,12 +36,22 @@ export async function PUT(request: NextRequest) {
           isPrimary: boolean;
         }>;
 
+        // A shelf's language is implied by its Audible region (region → language is
+        // 1:1). Derive it when the client didn't send one, so routing never relies
+        // on an empty language field.
+        const { AUDIBLE_REGIONS } = await import('@/lib/types/audible');
+        const languageForRegion = (region: string): string =>
+          (AUDIBLE_REGIONS as Record<string, { language?: string }>)[region]?.language || '';
+
         if (Array.isArray(shelves)) {
           normalizedShelves = (shelves as IncomingShelf[])
             .filter((s) => s && typeof s.libraryId === 'string' && s.libraryId.length > 0)
             .map((s) => ({
               libraryId: s.libraryId as string,
-              language: typeof s.language === 'string' ? s.language : '',
+              language:
+                typeof s.language === 'string' && s.language.length > 0
+                  ? s.language
+                  : languageForRegion(typeof s.region === 'string' ? s.region : ''),
               audience:
                 s.audience === 'kids' || s.audience === 'teen' || s.audience === 'adult'
                   ? s.audience

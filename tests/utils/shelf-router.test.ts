@@ -92,4 +92,40 @@ describe('shelf-router', () => {
       expect(r.shelf).toBe(b);
     });
   });
+
+  describe('selectShelf — language derived from region', () => {
+    // A shelf configured by region only (language left empty, e.g. an older
+    // config) must still route books of that region's language.
+    const regionShelf = (
+      libraryId: string,
+      region: string,
+      audience: ShelfAudience,
+      isPrimary = false
+    ): Shelf => ({ libraryId, language: '', audience, region, mediaPath: `/data/${libraryId}`, isPrimary });
+
+    it('routes a German book to a de-region shelf with empty language (the Känguru bug)', () => {
+      const deAdult = regionShelf('de-lib', 'de', 'adult');
+      const enPrimary = regionShelf('en-lib', 'us', 'adult', true);
+      const kids = regionShelf('kids-lib', 'de', 'kids');
+      const r = selectShelf({ language: 'German', genres: ['Roman'] }, [enPrimary, deAdult, kids]);
+      expect(r.shelf).toBe(deAdult);
+      expect(r.shelf?.mediaPath).toBe('/data/de-lib');
+    });
+
+    it('routes an English book to the us-region primary shelf', () => {
+      const deAdult = regionShelf('de-lib', 'de', 'adult');
+      const enPrimary = regionShelf('en-lib', 'us', 'adult', true);
+      const r = selectShelf({ language: 'en', genres: [] }, [deAdult, enPrimary]);
+      expect(r.shelf).toBe(enPrimary);
+    });
+
+    it('prefers an explicit language over the region-derived one', () => {
+      // Explicit language 'en' on a 'de'-region shelf wins (explicit beats derived).
+      const weird: Shelf = { libraryId: 'x', language: 'en', audience: 'adult', region: 'de', mediaPath: '/data/x', isPrimary: true };
+      const r = selectShelf({ language: 'en', genres: [] }, [weird]);
+      expect(r.shelf).toBe(weird);
+      const r2 = selectShelf({ language: 'de', genres: [] }, [weird]);
+      expect(r2.shelf).toBeNull(); // explicit 'en' shelf does not match a German book
+    });
+  });
 });

@@ -16,8 +16,21 @@
  */
 
 import type { Shelf, ShelfAudience } from '@/lib/services/config.service';
+import { AUDIBLE_REGIONS, type AudibleRegion } from '@/lib/types/audible';
 
 const AUDIENCE_ORDER: Record<ShelfAudience, number> = { kids: 0, teen: 1, adult: 2 };
+
+/**
+ * The language a shelf routes for. Prefer its explicit language, but fall back
+ * to the language implied by its Audible region (region → language is 1:1), so a
+ * shelf configured by region alone (e.g. an older config where `language` was
+ * never populated) still matches books in that language.
+ */
+function shelfLanguage(shelf: Shelf): string {
+  if (shelf.language) return normalizeLanguage(shelf.language);
+  const regionLang = AUDIBLE_REGIONS[shelf.region as AudibleRegion]?.language;
+  return regionLang ? normalizeLanguage(regionLang) : '';
+}
 
 export interface RoutableBook {
   language?: string | null;
@@ -74,7 +87,10 @@ export function selectShelf(book: RoutableBook, shelves: Shelf[]): ShelfRouteRes
   const language = normalizeLanguage(book.language);
   const audience = guessAudience(book.genres);
 
-  const langShelves = shelves.filter((s) => s.language && language && s.language === language);
+  const langShelves = shelves.filter((s) => {
+    const shelfLang = shelfLanguage(s);
+    return shelfLang && language && shelfLang === language;
+  });
   if (langShelves.length === 0) {
     return { shelf: null, language, audience, reason: 'no-language-match' };
   }

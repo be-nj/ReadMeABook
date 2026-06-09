@@ -93,6 +93,35 @@ describe('Admin settings — Audiobookshelf shelves roundtrip', () => {
     expect(stored[0].isPrimary).toBe(true);
   });
 
+  it('PUT derives an empty shelf language from its Audible region', async () => {
+    const shelves = [
+      // language intentionally empty — region implies it.
+      { libraryId: 'de-lib', language: '', audience: 'adult', region: 'de', mediaPath: '/m/de', isPrimary: true },
+      { libraryId: 'en-lib', language: '', audience: 'adult', region: 'us', mediaPath: '/m/en', isPrimary: false },
+    ];
+    const { PUT } = await import('@/app/api/admin/settings/audiobookshelf/route');
+    await PUT(jsonRequest({ serverUrl: 'http://abs', shelves }));
+
+    const updates = setManyMock.mock.calls[0][0] as Array<{ key: string; value: string }>;
+    const stored = JSON.parse(updates.find((u) => u.key === 'audiobookshelf.shelves')!.value);
+    expect(stored.find((s: any) => s.libraryId === 'de-lib').language).toBe('de');
+    expect(stored.find((s: any) => s.libraryId === 'en-lib').language).toBe('en');
+  });
+
+  it('GET derives an empty shelf language from its region', async () => {
+    prismaMock.configuration.findMany.mockResolvedValue([
+      {
+        key: 'audiobookshelf.shelves',
+        value: JSON.stringify([
+          { libraryId: 'de-lib', language: '', audience: 'adult', region: 'de', mediaPath: '/m/de', isPrimary: true },
+        ]),
+      },
+    ]);
+    const { GET } = await import('@/app/api/admin/settings/route');
+    const settings = await (await GET({} as any)).json();
+    expect(settings.audiobookshelf.shelves[0].language).toBe('de');
+  });
+
   it('GET derives shelves from legacy library_ids + media_dir when none are stored', async () => {
     prismaMock.configuration.findMany.mockResolvedValue([
       { key: 'audiobookshelf.library_ids', value: JSON.stringify(['l1', 'l2']) },
