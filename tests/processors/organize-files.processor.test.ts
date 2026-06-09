@@ -102,6 +102,87 @@ describe('processOrganizeFiles', () => {
     expect(libraryServiceMock.triggerLibraryScan).toHaveBeenCalledWith('lib-1');
   });
 
+  it('scans the routed shelf library (audiobookshelf) when the book has a shelfLibraryId', async () => {
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-de',
+      title: 'Deutsches Buch',
+      author: 'Autor',
+      narrator: null,
+      coverArtUrl: null,
+      audibleAsin: 'ASIN-DE',
+      shelfMediaPath: '/data/media/audio/audiobooks',
+      shelfLibraryId: 'de-lib',
+    });
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/data/media/audio/audiobooks/Autor/Deutsches Buch',
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: ['/data/media/audio/audiobooks/Autor/Deutsches Buch/book.m4b'],
+    });
+    prismaMock.audiobook.update.mockResolvedValue({});
+    configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    configMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.trigger_scan_after_import') return 'true';
+      if (key === 'audiobookshelf.library_id') return 'global-lib';
+      if (key === 'audiobook_path_template') return '{author}/{title}';
+      return null;
+    });
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    const result = await processOrganizeFiles({
+      requestId: 'req-de',
+      audiobookId: 'a-de',
+      downloadPath: '/downloads/de',
+      jobId: 'job-de',
+    });
+
+    expect(result.success).toBe(true);
+    // The routed shelf library is scanned, NOT the global library_id.
+    expect(libraryServiceMock.triggerLibraryScan).toHaveBeenCalledWith('de-lib');
+  });
+
+  it('scans the global audiobookshelf library when the book has no shelfLibraryId (back-compat)', async () => {
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-legacy',
+      title: 'Legacy Book',
+      author: 'Author',
+      narrator: null,
+      coverArtUrl: null,
+      audibleAsin: 'ASIN-LEGACY',
+      shelfMediaPath: null,
+      shelfLibraryId: null,
+    });
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/media/Author/Legacy Book',
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: ['/media/Author/Legacy Book/book.m4b'],
+    });
+    prismaMock.audiobook.update.mockResolvedValue({});
+    configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    configMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.trigger_scan_after_import') return 'true';
+      if (key === 'audiobookshelf.library_id') return 'global-lib';
+      if (key === 'audiobook_path_template') return '{author}/{title}';
+      return null;
+    });
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    const result = await processOrganizeFiles({
+      requestId: 'req-legacy',
+      audiobookId: 'a-legacy',
+      downloadPath: '/downloads/legacy',
+      jobId: 'job-legacy',
+    });
+
+    expect(result.success).toBe(true);
+    expect(libraryServiceMock.triggerLibraryScan).toHaveBeenCalledWith('global-lib');
+  });
+
   it('files into the audiobook shelf media path when set (multi-library routing)', async () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.findUnique.mockResolvedValue({

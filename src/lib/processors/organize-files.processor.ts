@@ -306,9 +306,11 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         // Get library service (returns PlexLibraryService or AudiobookshelfLibraryService)
         const libraryService = await getLibraryService();
 
-        // Get configured library ID (backend-specific config)
+        // Get the library ID to scan. For Audiobookshelf, prefer the shelf the
+        // book was routed into (matches the media path it was imported to);
+        // fall back to the global library_id for legacy/unrouted books.
         const libraryId = backendMode === 'audiobookshelf'
-          ? await configService.get('audiobookshelf.library_id')
+          ? (audiobook.shelfLibraryId || await configService.get('audiobookshelf.library_id'))
           : await configService.get('plex_audiobook_library_id');
 
         if (!libraryId) {
