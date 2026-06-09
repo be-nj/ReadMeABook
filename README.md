@@ -37,6 +37,7 @@ User friendly audible-backed searches, multi-file chapter merging, e-book sideca
 ## Features
 
 - **Plex** or **Audiobookshelf**
+- **Multi-library shelves**: Route requests to the right library by language & audience, with per-shelf region and a per-request override
 - **Torrents** via qBittorrent
 - **Usenet** via SABnzbd
 - **Prowlarr** for indexer search (torrents + NZBs)
@@ -45,6 +46,26 @@ User friendly audible-backed searches, multi-file chapter merging, e-book sideca
 - **E-book sidecar**: Optional EPUB/PDF downloads from Shadow Library
 - **Request approval**: Admin approval workflow for multi-user setups
 - **Setup wizard**: Step-by-step guided config with connection testing
+
+## Multi-library shelves
+
+Run more than one Audiobookshelf library (e.g. German, English, and a kids
+collection) from a single instance. Each enabled library becomes a **shelf** with:
+
+- an **Audible region** (which also sets the shelf's language for routing),
+- an **audience** tier (adult / teen / kids),
+- a **media output path** where its downloads are filed.
+
+**Ownership** is detected across *all* enabled libraries (a book counts as owned
+if it's in any of them). When you request a book, it's **routed** to the matching
+shelf by language and audience — audience only ever falls back *upward* (a kids
+title is never filed into an adult-only shelf, and vice-versa). The request
+dialog shows the resolved target library and lets you **override** it per request.
+Searches are **region-aware**: the search bar has a region switch (defaulting to
+your primary shelf) so you can browse the German or the English Audible store.
+
+Strictly backwards compatible: a single-library setup behaves exactly as before
+and is migrated automatically.
 
 ## Setup
 
