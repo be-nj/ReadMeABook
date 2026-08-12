@@ -1,6 +1,8 @@
-# CLAUDE.md - Project Standards & Workflow
+# CLAUDE.md
 
-**Critical:** This document defines AI-optimized documentation standards and development workflow. **NEVER PERFORM COMMITS ON THE REPOSITORY.**
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+**Critical:** This document defines AI-optimized documentation standards and development workflow. This is a private fork (`origin` = be-nj/ReadMeABook): committing and pushing to `origin` is allowed when the user asks. **NEVER push to `upstream` (kikootwo/ReadMeABook).**
 
 **ALWAYS DO:** When you feel work is complete, you MUST verify BOTH of the following pass before reporting the work as ready to test:
 1. `docker compose build readmeabook` — must succeed with no errors.
@@ -15,6 +17,51 @@ Only after BOTH succeed may you tell the user the work is ready to be tested.
 4. Only after approval: implement, build, and report results.
 
 This applies to bug fixes, feature requests, and any code changes. Investigation and analysis are always fine — writing code is not until approved.
+
+---
+
+## Commands
+
+```bash
+npm run dev                # Next.js dev server
+npm run build              # Production build
+npm run lint               # ESLint
+npm run test               # Full test suite (Vitest, required before "ready to test")
+npm run test:watch         # Vitest watch mode
+npm run test:coverage      # Coverage (v8)
+npx vitest run tests/api/admin-jobs.routes.test.ts   # Single test file
+npx vitest run -t "test name"                        # Single test by name
+npm run prisma:generate    # Regenerate Prisma client (after schema.prisma changes)
+npm run prisma:migrate     # Create/apply dev migration
+npm run db:push            # Push schema without migration
+docker compose build readmeabook   # Unified image build (required before "ready to test")
+```
+
+Tests live in `tests/` mirroring `src/` structure; Vitest runs in `node` environment with globals, setup in `tests/setup.ts`, alias `@` → `src/`.
+
+## Project Context
+
+**Fork** of [kikootwo/ReadMeABook](https://github.com/kikootwo/ReadMeABook) (audiobook automation: request → Prowlarr search → qBittorrent/SABnzbd download → organize → Plex/Audiobookshelf import). Fork-only feature: **multi-library shelves** — ownership union across all ABS libraries, language/audience request routing, per-shelf Audible region, per-request override with admin-gated audience downgrade.
+
+**Read `CONTEXT.md` before touching routing/shelf/library code** — it defines the domain language (Shelf, ABS Library, Owned cache, Library Backend, Language/Audience routing, Primary Shelf). "Library" unqualified is ambiguous; use the qualified terms. Architectural decisions in `docs/adr/`.
+
+## Architecture
+
+**Stack:** Next.js 16 App Router + React 19 + TypeScript + Tailwind 4 | PostgreSQL via Prisma | Bull job queue on Redis | single unified Docker image (Postgres + Redis + app in one container, `dockerfile.unified` + `docker-entrypoint.sh`).
+
+**Layers under `src/`:**
+- `app/api/` — API routes (admin, auth, audible, audiobooks, bookdate, requests, series, setup, user…)
+- `lib/integrations/` — external HTTP clients: Audible scraping, Prowlarr, qBittorrent/SABnzbd/Deluge/Transmission/NZBGet, Plex, Audnexus
+- `lib/processors/` — Bull job processors; the automation pipeline: `search-indexers` → `download-torrent`/`direct-download` → `monitor-download` → `organize-files` → library scan (`scan-plex`/`sync-shelves`), plus recurring jobs (audible-refresh, retry-*, monitor-rss-feeds, cleanup-seeded-torrents)
+- `lib/services/` — business logic; key abstractions:
+  - `services/library/ILibraryService` — Plex vs. Audiobookshelf backend (one per deployment)
+  - `services/auth/IAuthProvider` — Plex OAuth / OIDC / local auth
+  - `job-queue.service.ts` + `scheduler.service.ts` — Bull queues + cron
+  - `config.service.ts` + `encryption.service.ts` — DB-stored settings, encrypted credentials
+- `lib/utils/` — `shelf-router.ts` (routing), `ranking-algorithm.ts` (torrent selection), `file-organizer.ts`, `audiobook-matcher.ts`, `chapter-merger.ts`, `path-template.util.ts`
+- `middleware.ts` + `lib/middleware/auth.ts` — JWT route protection
+
+**Data:** Prisma schema in `prisma/schema.prisma` (~28 models). `PlexLibrary` is the **Owned cache** — legacy name, backend-agnostic (also used for ABS). `Request` drives the pipeline; `Job`/`JobEvent`/`ScheduledJob` back the queue.
 
 ---
 

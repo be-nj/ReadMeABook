@@ -138,6 +138,30 @@ Then run `docker compose up -d` to start.
 <img WIDTH="720" alt="image" src="screenshots/ADMIN.png" />
 <img WIDTH="720" alt="image" src="screenshots/BOOKDATE.png" />
 
+## Development
+
+**Stack:** Next.js 16 (App Router) + React 19 + TypeScript + Tailwind 4 · PostgreSQL via Prisma · Bull job queue on Redis · single unified Docker image (app + Postgres + Redis in one container).
+
+**Layout (`src/`):**
+
+- `app/api/` — API routes (admin, auth, audible, bookdate, requests, setup, …)
+- `lib/integrations/` — external clients: Audible scraping, Prowlarr, qBittorrent/SABnzbd/Deluge/Transmission/NZBGet, Plex, Audnexus
+- `lib/processors/` — Bull job processors forming the automation pipeline: `search-indexers` → `download-torrent`/`direct-download` → `monitor-download` → `organize-files` → library scan, plus recurring jobs (audible-refresh, retries, RSS monitoring, seed cleanup)
+- `lib/services/` — business logic; `ILibraryService` abstracts Plex vs. Audiobookshelf, `IAuthProvider` abstracts Plex OAuth / OIDC / local auth
+- `lib/utils/` — routing (`shelf-router.ts`), torrent selection (`ranking-algorithm.ts`), file organization, audiobook matching, chapter merging
+
+**Commands:**
+
+```bash
+npm run dev            # dev server
+npm run test           # full Vitest suite
+npm run lint           # ESLint
+npm run prisma:migrate # create/apply dev migration
+docker compose build readmeabook   # unified image build
+```
+
+For the fork's domain language (Shelf, ABS Library, Owned cache, routing rules) see [CONTEXT.md](CONTEXT.md); architectural decisions live in [docs/adr/](docs/adr/). Contributor documentation is under [documentation/](documentation/).
+
 ## Community
 
 Join the Discord: https://discord.gg/kaw6jKbKts
