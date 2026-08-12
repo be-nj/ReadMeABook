@@ -157,7 +157,7 @@ npm run dev            # dev server
 npm run test           # full Vitest suite
 npm run lint           # ESLint
 npm run prisma:migrate # create/apply dev migration
-docker compose build readmeabook   # unified image build
+docker compose -f docker-compose.local.yml build readmeabook   # unified image build
 ```
 
 For the fork's domain language (Shelf, ABS Library, Owned cache, routing rules) see [CONTEXT.md](CONTEXT.md); architectural decisions live in [docs/adr/](docs/adr/). Contributor documentation is under [documentation/](documentation/).

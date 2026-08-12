@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Critical:** This document defines AI-optimized documentation standards and development workflow. This is a private fork (`origin` = be-nj/ReadMeABook): committing and pushing to `origin` is allowed when the user asks. **NEVER push to `upstream` (kikootwo/ReadMeABook).**
 
 **ALWAYS DO:** When you feel work is complete, you MUST verify BOTH of the following pass before reporting the work as ready to test:
-1. `docker compose build readmeabook` — must succeed with no errors.
+1. `docker compose -f docker-compose.local.yml build readmeabook` — must succeed with no errors. (The default `docker-compose.yml` has no build section — it pulls the prebuilt image.)
 2. `npm run test` — the FULL test suite must pass (0 failures). Running a subset is not sufficient; the entire suite must be green.
 
 Only after BOTH succeed may you tell the user the work is ready to be tested.
@@ -34,7 +34,7 @@ npx vitest run -t "test name"                        # Single test by name
 npm run prisma:generate    # Regenerate Prisma client (after schema.prisma changes)
 npm run prisma:migrate     # Create/apply dev migration
 npm run db:push            # Push schema without migration
-docker compose build readmeabook   # Unified image build (required before "ready to test")
+docker compose -f docker-compose.local.yml build readmeabook   # Unified image build (required before "ready to test")
 ```
 
 Tests live in `tests/` mirroring `src/` structure; Vitest runs in `node` environment with globals, setup in `tests/setup.ts`, alias `@` → `src/`.
