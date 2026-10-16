@@ -13,7 +13,7 @@ vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({ getShelves: getShelvesMock, get: getConfigMock }),
 }));
 vi.mock('@/lib/integrations/audible.service', () => ({
-  getAudibleService: () => ({ getAudiobookDetails: getDetailsMock }),
+  getAudibleService: () => ({ getAudiobookDetails: getDetailsMock, getRegion: () => 'us', getBaseUrl: () => 'https://www.audible.com' }),
 }));
 
 const SHELVES = [

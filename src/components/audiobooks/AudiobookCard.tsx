@@ -264,6 +264,7 @@ export function AudiobookCard({
       {/* Details Modal */}
       <AudiobookDetailsModal
         asin={audiobook.asin}
+        region={audiobook.region}
         isOpen={showModal}
         onClose={() => setShowModal(false)}
         onRequestSuccess={onRequestSuccess}

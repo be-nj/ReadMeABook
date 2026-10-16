@@ -27,6 +27,8 @@ import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH } from '@/lib/constants/request-sta
 
 interface AudiobookDetailsModalProps {
   asin: string;
+  /** Audible region the ASIN came from (search result); passed through to details/routing. */
+  region?: string;
   isOpen: boolean;
   onClose: () => void;
   onRequestSuccess?: () => void;
@@ -75,6 +77,7 @@ const getStatusInfo = (isAvailable: boolean, requestStatus: string | null, reque
 
 export function AudiobookDetailsModal({
   asin,
+  region,
   isOpen,
   onClose,
   onRequestSuccess,
@@ -93,7 +96,7 @@ export function AudiobookDetailsModal({
 }: AudiobookDetailsModalProps) {
   const { user } = useAuth();
   const { squareCovers } = usePreferences();
-  const { audiobook, audibleBaseUrl, isLoading, error } = useAudiobookDetails(isOpen ? asin : null);
+  const { audiobook, audibleBaseUrl, isLoading, error } = useAudiobookDetails(isOpen ? asin : null, region);
   const { createRequest, isLoading: isRequesting } = useCreateRequest();
   const { ebookStatus, revalidate: revalidateEbookStatus } = useEbookStatus(isOpen && isAvailable ? asin : null);
   const { downloadAvailable, requestId: downloadRequestId } = useDownloadStatus(isOpen ? asin : null);
@@ -157,7 +160,7 @@ export function AudiobookDetailsModal({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetchWithAuth(`/api/audiobooks/${asin}/shelf-route`);
+        const res = await fetchWithAuth(`/api/audiobooks/${asin}/shelf-route${region ? `?region=${encodeURIComponent(region)}` : ''}`);
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
@@ -177,7 +180,7 @@ export function AudiobookDetailsModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, asin, status.canRequest, hideRequestActions]);
+  }, [isOpen, asin, region, status.canRequest, hideRequestActions]);
 
   // Advance the existing request via select-torrent (instead of creating a new one)
   // only when the viewer owns the request, or is admin, AND the status is one we route on.
@@ -218,7 +221,7 @@ export function AudiobookDetailsModal({
 
     try {
       await createRequest(
-        audiobook,
+        { ...audiobook, region: region ?? audiobook.region },
         selectedShelf
           ? { shelfLibraryId: selectedShelf, ...(isDowngrade && isAdmin && forceOverride ? { forceShelfOverride: true } : {}) }
           : undefined

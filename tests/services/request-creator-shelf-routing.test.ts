@@ -21,6 +21,8 @@ vi.mock('@/lib/utils/audiobook-matcher', () => ({
 
 const audibleServiceMock = vi.hoisted(() => ({
   getAudiobookDetails: vi.fn().mockResolvedValue(null),
+  getRegion: () => 'us',
+  getBaseUrl: () => 'https://www.audible.com',
 }));
 vi.mock('@/lib/integrations/audible.service', () => ({
   getAudibleService: () => audibleServiceMock,

@@ -9,7 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAudibleService } from '@/lib/integrations/audible.service';
+import { parseAudibleRegion, resolveAudiobookDetails } from '@/lib/services/audible-details-resolver';
 import { getConfigService } from '@/lib/services/config.service';
 import { selectShelf } from '@/lib/utils/shelf-router';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -69,7 +69,8 @@ export async function GET(
     let language: string | null = null;
     let genres: string[] | null = null;
     try {
-      const details = await getAudibleService().getAudiobookDetails(asin);
+      const preferredRegion = parseAudibleRegion(request?.nextUrl?.searchParams?.get('region'));
+      const details = (await resolveAudiobookDetails(asin, preferredRegion))?.audiobook ?? null;
       language = details?.language ?? null;
       genres = details?.genres ?? null;
     } catch (error) {

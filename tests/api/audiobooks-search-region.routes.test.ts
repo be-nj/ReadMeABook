@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const audibleServiceMock = vi.hoisted(() => ({
   search: vi.fn(),
+  getRegion: vi.fn(() => 'de'),
 }));
 // Captures the region argument the route passes in.
 const getAudibleServiceMock = vi.hoisted(() => vi.fn(() => audibleServiceMock));
@@ -102,5 +103,23 @@ describe('Audiobooks search route — region resolution', () => {
     getShelvesMock.mockRejectedValue(new Error('no config'));
     await callSearch('http://app/api/audiobooks/search?q=test');
     expect(getAudibleServiceMock).toHaveBeenCalledWith(undefined);
+  });
+
+  it('tags every result with the region it was searched in', async () => {
+    audibleServiceMock.search.mockResolvedValue({
+      query: 'q', results: [{ asin: 'A1', title: 'A' }, { asin: 'A2', title: 'B' }], totalResults: 2, page: 1, hasMore: false,
+    });
+    const response = await callSearch('http://app/api/audiobooks/search?q=test&region=uk');
+    const payload = await response.json();
+    expect(payload.results.map((r: any) => r.region)).toEqual(['uk', 'uk']);
+  });
+
+  it('tags results with the global region when nothing else resolves', async () => {
+    audibleServiceMock.search.mockResolvedValue({
+      query: 'q', results: [{ asin: 'A1', title: 'A' }], totalResults: 1, page: 1, hasMore: false,
+    });
+    const response = await callSearch('http://app/api/audiobooks/search?q=test');
+    const payload = await response.json();
+    expect(payload.results[0].region).toBe('de');
   });
 });

@@ -11,6 +11,7 @@ const audibleServiceMock = vi.hoisted(() => ({
   search: vi.fn(),
   getAudiobookDetails: vi.fn(),
   getBaseUrl: vi.fn().mockReturnValue('https://www.audible.com'),
+  getRegion: vi.fn().mockReturnValue('us'),
 }));
 const enrichMock = vi.hoisted(() => vi.fn());
 const currentUserMock = vi.hoisted(() => vi.fn());

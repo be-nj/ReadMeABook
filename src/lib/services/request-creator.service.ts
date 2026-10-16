@@ -11,7 +11,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
-import { getAudibleService } from '@/lib/integrations/audible.service';
+import { parseAudibleRegion, resolveAudiobookDetails } from '@/lib/services/audible-details-resolver';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
@@ -26,6 +26,8 @@ export interface CreateRequestInput {
   narrator?: string;
   description?: string;
   coverArtUrl?: string;
+  /** Audible region the ASIN came from (store-specific ASINs); tried first for details. */
+  region?: string;
 }
 
 export interface CreateRequestOptions {
@@ -129,8 +131,7 @@ export async function createRequestForUser(
   let bookLanguage: string | undefined;
   let bookGenres: string[] | undefined;
   try {
-    const audibleService = getAudibleService();
-    const audnexusData = await audibleService.getAudiobookDetails(audiobook.asin);
+    const audnexusData = (await resolveAudiobookDetails(audiobook.asin, parseAudibleRegion(audiobook.region)))?.audiobook ?? null;
 
     if (audnexusData?.releaseDate) {
       try {

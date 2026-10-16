@@ -24,6 +24,7 @@ const CreateRequestSchema = z.object({
     durationMinutes: z.number().optional(),
     releaseDate: z.string().optional(),
     rating: z.number().nullable().optional(),
+    region: z.string().optional(),
   }),
   /** Optional shelf (library) override from the request dialog. */
   shelfLibraryId: z.string().optional(),
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
         narrator: audiobook.narrator,
         description: audiobook.description,
         coverArtUrl: audiobook.coverArtUrl,
+        region: audiobook.region,
       }, { skipAutoSearch, bypassIgnore: true, shelfLibraryId, forceShelfOverride: forceShelfOverride === true && isAdmin });
 
       if (!result.success) {

@@ -4,14 +4,16 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAudibleService } from '@/lib/integrations/audible.service';
+import { parseAudibleRegion, resolveAudiobookDetails } from '@/lib/services/audible-details-resolver';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.Audiobooks.Details');
 
 /**
- * GET /api/audiobooks/[asin]
- * Get detailed information for a specific audiobook
+ * GET /api/audiobooks/[asin]?region=de
+ * Get detailed information for a specific audiobook. ASINs are store-specific,
+ * so the optional `region` (the one the ASIN came from) is tried first; the
+ * resolver then falls back to the global region and every shelf region.
  */
 export async function GET(
   request: NextRequest,
@@ -30,10 +32,10 @@ export async function GET(
       );
     }
 
-    const audibleService = getAudibleService();
-    const audiobook = await audibleService.getAudiobookDetails(asin);
+    const preferredRegion = parseAudibleRegion(request?.nextUrl?.searchParams?.get('region'));
+    const resolved = await resolveAudiobookDetails(asin, preferredRegion);
 
-    if (!audiobook) {
+    if (!resolved) {
       return NextResponse.json(
         {
           error: 'NotFound',
@@ -45,8 +47,9 @@ export async function GET(
 
     return NextResponse.json({
       success: true,
-      audiobook,
-      audibleBaseUrl: audibleService.getBaseUrl(),
+      audiobook: resolved.audiobook,
+      audibleBaseUrl: resolved.audibleBaseUrl,
+      region: resolved.region ?? null,
     });
   } catch (error) {
     logger.error('Failed to get audiobook details', { error: error instanceof Error ? error.message : String(error) });

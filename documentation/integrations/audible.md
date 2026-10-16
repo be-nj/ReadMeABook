@@ -111,6 +111,13 @@ Configurable Audible region for accurate metadata matching across international 
 - Cache clearing: Region change clears ConfigService cache and AudibleService state.
 - Automatic refresh: Region change triggers `audible_refresh` job.
 
+**Store-specific ASINs & details resolution (fork):**
+- Same book = different ASIN per store (e.g. one title: `B0…US` us, `B0…UK` uk, `B0…DE` de). An ASIN from a `us` search is unknown to Audnexus `region=de` (404) and the `api.audible.de` catalog returns a stub → details 404.
+- `GET /api/audiobooks/search` tags every result with `region` (the region actually searched: param > primary shelf > global).
+- `src/lib/services/audible-details-resolver.ts` — `resolveAudiobookDetails(asin, preferredRegion?)`: tries preferred → global service → each distinct shelf region (deduped); returns `{audiobook, region, audibleBaseUrl}` or null. `parseAudibleRegion()` narrows untrusted strings.
+- Consumers: `GET /api/audiobooks/[asin]?region=`, `GET /api/audiobooks/[asin]/shelf-route?region=`, `createRequestForUser()` (`CreateRequestInput.region`, sent by `POST /api/requests` body `audiobook.region`).
+- Frontend: `Audiobook.region` → `AudiobookCard` → `AudiobookDetailsModal` prop `region` → `useAudiobookDetails(asin, region)`; the modal forwards `region` on request creation. `useAudiobookDetails` retries errors twice (`errorRetryCount: 2`) instead of caching a miss for 5 min.
+
 **Per-region HTTP clients (on init):**
 - `apiClient` — `baseURL=apiBaseUrl`, `Accept: application/json`, `User-Agent: ReadMeABook/1.0`, no language/ipRedirect params. Used for the real-time JSON catalog operations (search, author books, categories listing, per-ASIN details fallback).
 - `htmlClient` — `baseURL=baseUrl`, rotating browser headers (`pickUserAgent` + `getBrowserHeaders`), default params `ipRedirectOverride=true` + `language=<audibleLocaleParam>`. Used by the nightly discovery refresh (`/adblbestsellers`, `/newreleases`, `/search?node=...`), by `audible-series.ts`, and by `getBaseUrl()`-based link generation.

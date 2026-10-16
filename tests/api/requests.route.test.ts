@@ -46,6 +46,8 @@ vi.mock('@/lib/integrations/audible.service', () => ({
 describe('Requests API routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Shelves are read by both the details resolver and the router; keep the default persistent.
+    getShelvesMock.mockImplementation(() => Promise.resolve([]));
     authRequest = {
       user: { id: 'user-1', role: 'user' },
       nextUrl: new URL('http://localhost/api/requests'),
@@ -205,7 +207,7 @@ describe('Requests API routes', () => {
   });
 
   it('blocks a non-admin audience downgrade override even with force (force is stripped)', async () => {
-    getShelvesMock.mockResolvedValueOnce([
+    getShelvesMock.mockResolvedValue([
       { libraryId: 'kids-lib', language: 'de', audience: 'kids', region: 'de', mediaPath: '/m/kids', isPrimary: false },
       { libraryId: 'de-lib', language: 'de', audience: 'adult', region: 'de', mediaPath: '/m/de', isPrimary: true },
     ]);
@@ -228,7 +230,7 @@ describe('Requests API routes', () => {
   });
 
   it('allows an admin to force an audience downgrade override', async () => {
-    getShelvesMock.mockResolvedValueOnce([
+    getShelvesMock.mockResolvedValue([
       { libraryId: 'kids-lib', language: 'de', audience: 'kids', region: 'de', mediaPath: '/m/kids', isPrimary: false },
       { libraryId: 'de-lib', language: 'de', audience: 'adult', region: 'de', mediaPath: '/m/de', isPrimary: true },
     ]);

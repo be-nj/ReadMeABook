@@ -38,6 +38,7 @@ export interface Audiobook {
   language?: string;
   formatType?: string;
   publisherName?: string;
+  region?: string;  // Audible region the ASIN was found in (ASINs are store-specific)
 }
 
 export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 20, page: number = 1, hideAvailable: boolean = false) {
@@ -124,12 +125,14 @@ export function useSearch(query: string, region?: string) {
   };
 }
 
-export function useAudiobookDetails(asin: string | null) {
-  const endpoint = asin ? `/api/audiobooks/${asin}` : null;
+export function useAudiobookDetails(asin: string | null, region?: string) {
+  const regionParam = region ? `?region=${encodeURIComponent(region)}` : '';
+  const endpoint = asin ? `/api/audiobooks/${asin}${regionParam}` : null;
 
   const { data, error, isLoading } = useSWR(endpoint, authenticatedFetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 300000, // Cache for 5 minutes
+    errorRetryCount: 2, // Transient upstream (Audnexus/Audible) misses: retry briefly, not for 5 min
   });
 
   return {

@@ -59,6 +59,12 @@ export async function GET(request: NextRequest) {
     const region = await resolveSearchRegion(searchParams.get('region'));
     const audibleService = getAudibleService(region);
     const results = await audibleService.search(query, page);
+    // ASINs are store-specific: tag each result with the region it came from so
+    // the details/request calls can resolve it in the same store.
+    const searchedRegion = region ?? audibleService.getRegion();
+    for (const result of results.results) {
+      (result as { region?: string }).region = searchedRegion;
+    }
 
     // Get current user (optional — JWT or API token — for request-status enrichment)
     const currentUser = await getCurrentUserAsync(request);
