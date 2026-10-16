@@ -16,7 +16,7 @@ The multi-library fork deploys from the public GitHub fork only — no Forgejo r
     -H "Content-Type: application/json" -d '{"type":"DeployStack","params":{"stack":"<stack>","services":["readmeabook"]}}'
   ```
   Poll `{"type":"GetUpdate","params":{"id":"<_id.$oid>"}}` on `/read` until `status: Complete`. No GitHub→Komodo call (Komodo is LAN-only).
-- **Rollback:** set the compose image to `ghcr.io/be-nj/readmeabook:sha-<short7>` via Komodo API `UpdateStack` + `DeployStack {"stack":"arr","services":["readmeabook"]}`; switch back to `:multilib` before the next regular deploy.
+- **Rollback:** set the compose image to `ghcr.io/be-nj/readmeabook:sha-<short7>` via Komodo API `UpdateStack` + `DeployStack {"stack":"<stack>","services":["readmeabook"]}`; switch back to `:multilib` before the next regular deploy.
 - **Verify:** `<public URL>/api/version` (`version`, `commit`, `buildDate`).
 - **Upstream tag workflow** (`build-unified-image.yml`, `v*` tags, multi-arch) is unchanged; `v<upstream>-multilib.N` tags still publish semver tags but deploy nothing.
 - **Local build check** stays `docker compose -f docker-compose.local.yml build readmeabook` (CLAUDE.md gate).
