@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Critical:** This document defines AI-optimized documentation standards and development workflow. This is a private fork (`origin` = be-nj/ReadMeABook): committing and pushing to `origin` is allowed when the user asks. **NEVER push to `upstream` (kikootwo/ReadMeABook).**
+**Critical:** This document defines AI-optimized documentation standards and development workflow. This is a private fork (`origin` = be-nj/ReadMeABook): committing and pushing to `origin` is allowed when the user asks. **NEVER push to `upstream` (kikootwo/ReadMeABook).** Pushing `feat/multi-library-owned` to `origin` builds `ghcr.io/be-nj/readmeabook:multilib` via GitHub Actions; deploying to the homelab is a separate manual Komodo call (see `documentation/deployment/fork-ci.md`).
 
 **ALWAYS DO:** When you feel work is complete, you MUST verify BOTH of the following pass before reporting the work as ready to test:
 1. `docker compose -f docker-compose.local.yml build readmeabook` — must succeed with no errors. (The default `docker-compose.yml` has no build section — it pulls the prebuilt image.)
