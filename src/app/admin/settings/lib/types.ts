@@ -44,9 +44,11 @@ export type ShelfAudience = 'kids' | 'teen' | 'adult';
  */
 export interface Shelf {
   libraryId: string;
-  /** Audible region used to search this shelf's content. */
+  /** Home Audible store (= regions[0]); mirror kept for older readers. */
   region: string;
-  /** Language code, derived from region; drives request routing. */
+  /** Audible stores searched for this shelf, home store first (e.g. en: us + uk). */
+  regions: string[];
+  /** Language code, derived from the home store; drives request routing. */
   language: string;
   audience: ShelfAudience;
   mediaPath: string;

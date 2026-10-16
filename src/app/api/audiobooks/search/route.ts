@@ -13,32 +13,44 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
 import { getConfigService } from '@/lib/services/config.service';
 import { AUDIBLE_REGIONS, type AudibleRegion } from '@/lib/types/audible';
+import { shelfRegions } from '@/lib/utils/shelf-regions';
 
 const logger = RMABLogger.create('API.Audiobooks.Search');
 
 /**
- * Resolve the Audible region for a search: an explicit `region` param wins,
- * otherwise the primary shelf's region, otherwise undefined (global default).
+ * Resolve the Audible regions a search fans out over (ADR-0002, amended):
+ *  - explicit `region` param → that one store (API clients, power users);
+ *  - `shelf=<libraryId>` → that shelf's store set (the UI's scope picker);
+ *  - otherwise the primary shelf's stores (else the first shelf's);
+ *  - no shelves at all → [undefined] = the global default service.
  */
-async function resolveSearchRegion(regionParam: string | null): Promise<AudibleRegion | undefined> {
+async function resolveSearchRegions(
+  regionParam: string | null,
+  shelfParam: string | null,
+): Promise<{ regions: Array<AudibleRegion | undefined>; shelf: string | null }> {
   if (regionParam && regionParam in AUDIBLE_REGIONS) {
-    return regionParam as AudibleRegion;
+    return { regions: [regionParam as AudibleRegion], shelf: null };
   }
   try {
     const shelves = await getConfigService().getShelves();
-    const primary = shelves.find((s) => s.isPrimary) || shelves[0];
-    if (primary?.region && primary.region in AUDIBLE_REGIONS) {
-      return primary.region as AudibleRegion;
+    const chosen =
+      (shelfParam && shelves.find((s) => s.libraryId === shelfParam)) ||
+      shelves.find((s) => s.isPrimary) ||
+      shelves[0];
+    if (chosen) {
+      const regions = shelfRegions(chosen);
+      if (regions.length > 0) return { regions, shelf: chosen.libraryId };
     }
   } catch {
     // Fall back to the global region.
   }
-  return undefined;
+  return { regions: [undefined], shelf: null };
 }
 
 /**
- * GET /api/audiobooks/search?q=query&page=1
- * Search for audiobooks on Audible
+ * GET /api/audiobooks/search?q=query&page=1[&shelf=<libraryId>|&region=de]
+ * Search Audible. A shelf's stores are searched in parallel and merged; every
+ * result carries the `region` it came from (ASINs are store-specific).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -56,15 +68,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const region = await resolveSearchRegion(searchParams.get('region'));
-    const audibleService = getAudibleService(region);
-    const results = await audibleService.search(query, page);
-    // ASINs are store-specific: tag each result with the region it came from so
-    // the details/request calls can resolve it in the same store.
-    const searchedRegion = region ?? audibleService.getRegion();
-    for (const result of results.results) {
-      (result as { region?: string }).region = searchedRegion;
-    }
+    const { regions, shelf } = await resolveSearchRegions(searchParams.get('region'), searchParams.get('shelf'));
+
+    const perRegion = await Promise.all(
+      regions.map(async (region) => {
+        const audibleService = getAudibleService(region);
+        const result = await audibleService.search(query, page);
+        const searchedRegion = region ?? audibleService.getRegion();
+        for (const book of result.results) {
+          (book as { region?: string }).region = searchedRegion;
+        }
+        return { ...result, region: searchedRegion };
+      }),
+    );
+
+    // Merge store by store (home store first); dedup below collapses the same
+    // book's editions across stores and the works table remembers the siblings.
+    const results = {
+      query,
+      page,
+      results: perRegion.flatMap((r) => r.results),
+      totalResults: perRegion.reduce((sum, r) => sum + (r.totalResults || 0), 0),
+      hasMore: perRegion.some((r) => r.hasMore),
+    };
 
     // Get current user (optional — JWT or API token — for request-status enrichment)
     const currentUser = await getCurrentUserAsync(request);
@@ -94,6 +120,8 @@ export async function GET(request: NextRequest) {
       totalResults: enrichedResults.length,
       page: results.page,
       hasMore: results.hasMore,
+      regions: perRegion.map((r) => r.region),
+      shelf,
     });
   } catch (error) {
     logger.error('Failed to search audiobooks', { error: error instanceof Error ? error.message : String(error) });

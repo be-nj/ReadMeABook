@@ -12,6 +12,7 @@
 import { getAudibleService, type AudibleAudiobook } from '@/lib/integrations/audible.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { AUDIBLE_REGIONS, DEFAULT_AUDIBLE_REGION, type AudibleRegion } from '@/lib/types/audible';
+import { allShelfRegions } from '@/lib/utils/shelf-regions';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('AudibleDetailsResolver');
@@ -32,13 +33,7 @@ export function parseAudibleRegion(value: string | null | undefined): AudibleReg
 /** Distinct, valid regions across all configured shelves (best-effort). */
 async function getShelfRegions(): Promise<AudibleRegion[]> {
   try {
-    const shelves = await getConfigService().getShelves();
-    const regions = new Set<AudibleRegion>();
-    for (const shelf of shelves) {
-      const region = parseAudibleRegion(shelf.region);
-      if (region) regions.add(region);
-    }
-    return [...regions];
+    return allShelfRegions(await getConfigService().getShelves());
   } catch {
     return [];
   }

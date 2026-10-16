@@ -41,6 +41,7 @@
 - **Combined shelves API, GenericShelf** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
 - **Hook factory (createShelfHooks)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#hook-factory)
 - **Adding a new shelf provider** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)
+- **Multi-library Shelves (Language × Audience, region sets, search scope, `GET /api/shelves`)** → [features/multi-library-prd.md](features/multi-library-prd.md), `CONTEXT.md`, `docs/adr/0002-region-per-language-multi-region.md`
 
 ## Audible Integration
 - **Web scraping (popular, new releases)** → [integrations/audible.md](integrations/audible.md)
@@ -160,6 +161,7 @@
 **"How do I customize audiobook folder organization?"** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)
 **"How do I use the unified container?"** → [deployment/unified.md](deployment/unified.md)
+**"Which Audible stores does a search cover?"** → [integrations/audible.md](integrations/audible.md#region-configuration) (per-shelf region sets, `?shelf=` scope)
 **"How does the fork get deployed to the homelab?"** → [deployment/fork-ci.md](deployment/fork-ci.md)
 **"Why can't RMAB find my downloaded files?"** → [deployment/volume-mapping.md](deployment/volume-mapping.md)
 **"How do I set up volume mapping for qBittorrent/Transmission/SABnzbd/NZBGet?"** → [deployment/volume-mapping.md](deployment/volume-mapping.md)

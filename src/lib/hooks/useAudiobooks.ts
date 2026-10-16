@@ -75,10 +75,25 @@ function dedupeByAsin<T extends { asin: string }>(items: T[]): T[] {
   });
 }
 
-export function useSearch(query: string, region?: string) {
+/**
+ * Search scope: a shelf (its store set) or one explicit region. Region wins
+ * when both are given, mirroring the API.
+ */
+export interface SearchScope {
+  shelf?: string;
+  region?: string;
+}
+
+export function useSearch(query: string, scope: SearchScope | string = {}) {
+  const normalizedScope: SearchScope = typeof scope === 'string' ? { region: scope } : scope;
+  const scopeParam = normalizedScope.region
+    ? `&region=${encodeURIComponent(normalizedScope.region)}`
+    : normalizedScope.shelf
+      ? `&shelf=${encodeURIComponent(normalizedScope.shelf)}`
+      : '';
   const prevQueryRef = useRef(query);
-  const prevRegionRef = useRef(region);
-  const regionParam = region ? `&region=${encodeURIComponent(region)}` : '';
+  const prevRegionRef = useRef(scopeParam);
+  const regionParam = scopeParam;
 
   const { data, error, size, setSize, isLoading, isValidating } = useSWRInfinite(
     (pageIndex, prevPageData) => {
@@ -95,14 +110,14 @@ export function useSearch(query: string, region?: string) {
     }
   );
 
-  // Reset to page 1 when query or region changes
+  // Reset to page 1 when query or scope changes
   useEffect(() => {
-    if (query !== prevQueryRef.current || region !== prevRegionRef.current) {
+    if (query !== prevQueryRef.current || scopeParam !== prevRegionRef.current) {
       prevQueryRef.current = query;
-      prevRegionRef.current = region;
+      prevRegionRef.current = scopeParam;
       setSize(1);
     }
-  }, [query, region, setSize]);
+  }, [query, scopeParam, setSize]);
 
   const results = data ? dedupeByAsin(data.flatMap(page => page?.results || [])) : [];
   const totalResults = data?.[0]?.totalResults || 0;
@@ -138,6 +153,28 @@ export function useAudiobookDetails(asin: string | null, region?: string) {
   return {
     audiobook: data?.audiobook || null,
     audibleBaseUrl: data?.audibleBaseUrl || 'https://www.audible.com',
+    isLoading,
+    error,
+  };
+}
+
+export interface ShelfSummary {
+  libraryId: string;
+  label: string;
+  language: string;
+  audience: string;
+  regions: string[];
+  isPrimary: boolean;
+}
+
+/** Configured shelves with display labels (GET /api/shelves). */
+export function useShelves() {
+  const { data, error, isLoading } = useSWR('/api/shelves', authenticatedFetcher, {
+    revalidateOnFocus: false,
+    dedupingInterval: 300000,
+  });
+  return {
+    shelves: (data?.shelves || []) as ShelfSummary[],
     isLoading,
     error,
   };

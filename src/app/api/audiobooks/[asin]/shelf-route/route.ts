@@ -12,34 +12,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseAudibleRegion, resolveAudiobookDetails } from '@/lib/services/audible-details-resolver';
 import { getConfigService } from '@/lib/services/config.service';
 import { selectShelf } from '@/lib/utils/shelf-router';
+import { fetchLibraryNames } from '@/lib/services/shelf-labels';
+import { shelfRegions } from '@/lib/utils/shelf-regions';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.Audiobooks.ShelfRoute');
-
-/**
- * Fetch a map of Audiobookshelf library id -> display name. Best-effort: on any
- * failure returns an empty map and callers fall back to the library id.
- */
-async function fetchLibraryNames(): Promise<Record<string, string>> {
-  try {
-    const config = getConfigService();
-    const serverUrl = await config.get('audiobookshelf.server_url');
-    const apiToken = await config.get('audiobookshelf.api_token');
-    if (!serverUrl || !apiToken) return {};
-    const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/libraries`, {
-      headers: { Authorization: `Bearer ${apiToken}` },
-    });
-    if (!res.ok) return {};
-    const data = await res.json();
-    const map: Record<string, string> = {};
-    for (const lib of data.libraries || []) {
-      if (lib?.id) map[lib.id] = lib.name || lib.id;
-    }
-    return map;
-  } catch {
-    return {};
-  }
-}
 
 /**
  * GET /api/audiobooks/[asin]/shelf-route
@@ -85,6 +62,7 @@ export async function GET(
         libraryId: s.libraryId,
         label: names[s.libraryId] || s.libraryId,
         region: s.region,
+        regions: shelfRegions(s),
         audience: s.audience,
         mediaPath: s.mediaPath,
         isPrimary: s.isPrimary === true,

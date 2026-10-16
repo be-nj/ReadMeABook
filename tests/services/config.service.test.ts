@@ -298,8 +298,8 @@ describe('ConfigurationService — getShelves (multi-library write-side model)',
     const { ConfigurationService } = await import('@/lib/services/config.service');
     const shelves = await new ConfigurationService().getShelves();
     expect(shelves).toEqual([
-      { libraryId: 'en-id', language: '', audience: 'adult', region: 'uk', mediaPath: '/data/media/audio/audiobooks', isPrimary: true },
-      { libraryId: 'de-id', language: '', audience: 'adult', region: 'uk', mediaPath: '/data/media/audio/audiobooks', isPrimary: false },
+      { libraryId: 'en-id', language: '', audience: 'adult', region: 'uk', regions: ['uk'], mediaPath: '/data/media/audio/audiobooks', isPrimary: true },
+      { libraryId: 'de-id', language: '', audience: 'adult', region: 'uk', regions: ['uk'], mediaPath: '/data/media/audio/audiobooks', isPrimary: false },
     ]);
   });
 
@@ -325,6 +325,18 @@ describe('ConfigurationService — getShelves (multi-library write-side model)',
     const { ConfigurationService } = await import('@/lib/services/config.service');
     expect(await new ConfigurationService().getShelves()).toEqual([]);
   });
+
+  it('reads a shelf region set and mirrors the home store into region', async () => {
+    mockConfig({
+      'audiobookshelf.shelves': JSON.stringify([
+        { libraryId: 'en-id', language: 'en', audience: 'adult', regions: ['us', 'uk', 'bogus'], mediaPath: '/m/en', isPrimary: true },
+        { libraryId: 'de-id', language: 'de', audience: 'adult', region: 'de', mediaPath: '/m/de', isPrimary: false },
+      ]),
+    });
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const shelves = await new ConfigurationService().getShelves();
+    expect(shelves[0]).toMatchObject({ regions: ['us', 'uk'], region: 'us' });
+    // Older configs only carry `region`: it becomes a one-store set.
+    expect(shelves[1]).toMatchObject({ regions: ['de'], region: 'de' });
+  });
 });
-
-

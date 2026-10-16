@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Settings, ABSLibrary, Shelf, ShelfAudience } from '../../lib/types';
 import { AUDIBLE_REGIONS } from '@/lib/types/audible';
+import { languageForRegions, normalizeShelfRegions } from '@/lib/utils/shelf-regions';
 
 interface AudiobookshelfSectionProps {
   settings: Settings;
@@ -35,9 +36,12 @@ export function AudiobookshelfSection({
 }: AudiobookshelfSectionProps) {
   const shelves = settings.audiobookshelf.shelves || [];
 
-  // Region implies the language (1:1), so picking a region also sets the routing language.
-  const langForRegion = (region: string): string =>
-    (AUDIBLE_REGIONS[region as keyof typeof AUDIBLE_REGIONS]?.language as string) || '';
+  // A shelf searches a set of Audible stores; its home store (the first one)
+  // implies the routing language (1:1), so the store set also sets the language.
+  const withRegions = (shelf: Shelf, regions: string[]): Shelf => {
+    const normalized = normalizeShelfRegions(regions);
+    return { ...shelf, regions: normalized, region: normalized[0] ?? '', language: languageForRegions(normalized) };
+  };
 
   const handleServerUrlChange = (serverUrl: string) => {
     onChange({
@@ -89,7 +93,10 @@ export function AudiobookshelfSection({
       const region = settings.audibleRegion || 'us';
       applyShelves([
         ...shelves,
-        { libraryId, region, language: langForRegion(region), audience: 'adult', mediaPath: '', isPrimary: shelves.length === 0 },
+        withRegions(
+          { libraryId, region, regions: [], language: '', audience: 'adult', mediaPath: '', isPrimary: shelves.length === 0 },
+          [region],
+        ),
       ]);
     } else {
       applyShelves(shelves.filter((s) => s.libraryId !== libraryId));
@@ -100,8 +107,18 @@ export function AudiobookshelfSection({
     applyShelves(shelves.map((s) => (s.libraryId === libraryId ? { ...s, ...patch } : s)));
   };
 
-  const handleRegionChange = (libraryId: string, region: string) => {
-    handleShelfField(libraryId, { region, language: langForRegion(region) });
+  // Toggle one store in a shelf's set. Order follows AUDIBLE_REGIONS, so the
+  // home store is the first enabled one in that list.
+  const handleRegionToggle = (libraryId: string, region: string, enabled: boolean) => {
+    applyShelves(
+      shelves.map((s) => {
+        if (s.libraryId !== libraryId) return s;
+        const current = normalizeShelfRegions(s.regions, s.region);
+        const next = enabled ? [...current, region] : current.filter((r) => r !== region);
+        const ordered = Object.keys(AUDIBLE_REGIONS).filter((code) => next.includes(code));
+        return withRegions(s, ordered);
+      }),
+    );
   };
 
   const handleSetPrimary = (libraryId: string) => {
@@ -186,20 +203,37 @@ export function AudiobookshelfSection({
 
                   {shelf && (
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 pl-6">
-                      <div>
-                        <label className={subLabelClass}>Region (Audible store / language)</label>
-                        <select
-                          value={shelf.region}
-                          onChange={(e) => handleRegionChange(lib.id, e.target.value)}
-                          className={fieldClass}
-                        >
-                          <option value="">Select…</option>
-                          {Object.values(AUDIBLE_REGIONS).map((r) => (
-                            <option key={r.code} value={r.code}>
-                              {r.name}
-                            </option>
-                          ))}
-                        </select>
+                      <div className="sm:col-span-2">
+                        <span className={subLabelClass}>Audible stores (first enabled = home store, sets the language)</span>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {Object.values(AUDIBLE_REGIONS).map((r) => {
+                            const regions = normalizeShelfRegions(shelf.regions, shelf.region);
+                            const checked = regions.includes(r.code);
+                            const foreign = !!shelf.language && r.language !== shelf.language && !checked;
+                            return (
+                              <label
+                                key={r.code}
+                                className={`flex items-center gap-1 text-sm cursor-pointer ${foreign ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-300'}`}
+                                title={foreign ? `Different language (${r.language}) than this shelf (${shelf.language})` : undefined}
+                              >
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${r.name} store`}
+                                  checked={checked}
+                                  onChange={(e) => handleRegionToggle(lib.id, r.code, e.target.checked)}
+                                  className="rounded border-gray-300 dark:border-gray-600"
+                                />
+                                <span>{r.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          Language: <span className="font-medium">{shelf.language || '—'}</span>
+                          {shelf.language && normalizeShelfRegions(shelf.regions, shelf.region).some((c) => AUDIBLE_REGIONS[c].language !== shelf.language)
+                            ? ' · mixed languages: search results from other-language stores will not route here'
+                            : ''}
+                        </p>
                       </div>
                       <div>
                         <label className={subLabelClass}>Audience</label>
@@ -234,7 +268,7 @@ export function AudiobookshelfSection({
                             checked={!!shelf.isPrimary}
                             onChange={() => handleSetPrimary(lib.id)}
                           />
-                          <span>Primary (search default &amp; routing fallback)</span>
+                          <span>Primary (routing fallback &amp; search default until a shelf is picked)</span>
                         </label>
                       </div>
                     </div>
@@ -296,7 +330,7 @@ export function AudiobookshelfSection({
           ))}
         </select>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Default Audible region for search and metadata. (Per-shelf regions arrive with multi-region search.)
+          Fallback Audible region for metadata lookups and for new shelves. Searching uses each shelf&apos;s own stores.
         </p>
       </div>
 

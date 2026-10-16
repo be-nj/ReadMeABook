@@ -24,6 +24,7 @@ const usePreferencesMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useAudiobooks', () => ({
   useSearch: useSearchMock,
+  useShelves: () => ({ shelves: [], isLoading: false, error: undefined }),
   Audiobook: {},
 }));
 
@@ -111,8 +112,8 @@ describe('SearchPage', () => {
     render(<SearchPage />);
 
     expect(screen.getByText('Start typing to search for audiobooks')).toBeInTheDocument();
-    // Region defaults to '' (Auto = primary shelf) alongside the query.
-    expect(useSearchMock).toHaveBeenCalledWith('', '');
+    // Scope defaults to no shelf (= the primary shelf's stores) alongside the query.
+    expect(useSearchMock).toHaveBeenCalledWith('', { shelf: '' });
   });
 
   it('debounces search input and loads more results', async () => {

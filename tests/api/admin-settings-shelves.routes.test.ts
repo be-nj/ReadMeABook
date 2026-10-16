@@ -62,8 +62,9 @@ describe('Admin settings — Audiobookshelf shelves roundtrip', () => {
 
     const updates = setManyMock.mock.calls[0][0] as Array<{ key: string; value: string }>;
     const byKey = new Map(updates.map((u) => [u.key, u.value]));
-    // Persisted shape: full shelves JSON + legacy mirrors.
-    expect(JSON.parse(byKey.get('audiobookshelf.shelves') as string)).toEqual(shelves);
+    // Persisted shape: full shelves JSON (region set + home-store mirror) + legacy mirrors.
+    const expectedStored = shelves.map((s) => ({ ...s, regions: [s.region] }));
+    expect(JSON.parse(byKey.get('audiobookshelf.shelves') as string)).toEqual(expectedStored);
     expect(JSON.parse(byKey.get('audiobookshelf.library_ids') as string)).toEqual(['de-lib', 'en-lib', 'kids-lib']);
     expect(byKey.get('audiobookshelf.library_id')).toBe('de-lib'); // the primary
 
@@ -74,7 +75,7 @@ describe('Admin settings — Audiobookshelf shelves roundtrip', () => {
     expect(getRes.status).toBe(200);
     const settings = await getRes.json();
 
-    expect(settings.audiobookshelf.shelves).toEqual(shelves);
+    expect(settings.audiobookshelf.shelves).toEqual(expectedStored);
     expect(settings.audiobookshelf.libraryIds).toEqual(['de-lib', 'en-lib', 'kids-lib']);
     expect(settings.audiobookshelf.libraryId).toBe('de-lib');
   });
@@ -133,8 +134,20 @@ describe('Admin settings — Audiobookshelf shelves roundtrip', () => {
     const settings = await (await GET({} as any)).json();
 
     expect(settings.audiobookshelf.shelves).toEqual([
-      { libraryId: 'l1', region: 'us', language: '', audience: 'adult', mediaPath: '/data/media/audio/audiobooks', isPrimary: true },
-      { libraryId: 'l2', region: 'us', language: '', audience: 'adult', mediaPath: '/data/media/audio/audiobooks', isPrimary: false },
+      { libraryId: 'l1', region: 'us', regions: ['us'], language: '', audience: 'adult', mediaPath: '/data/media/audio/audiobooks', isPrimary: true },
+      { libraryId: 'l2', region: 'us', regions: ['us'], language: '', audience: 'adult', mediaPath: '/data/media/audio/audiobooks', isPrimary: false },
     ]);
+  });
+
+  it('PUT keeps a shelf region set, mirrors the home store and derives the language from it', async () => {
+    const shelves = [
+      { libraryId: 'en-lib', language: '', audience: 'adult', regions: ['us', 'uk', 'nope'], mediaPath: '/m/en', isPrimary: true },
+    ];
+    const { PUT } = await import('@/app/api/admin/settings/audiobookshelf/route');
+    await PUT(jsonRequest({ serverUrl: 'http://abs', shelves }));
+
+    const updates = setManyMock.mock.calls[0][0] as Array<{ key: string; value: string }>;
+    const stored = JSON.parse(updates.find((u) => u.key === 'audiobookshelf.shelves')!.value);
+    expect(stored[0]).toMatchObject({ regions: ['us', 'uk'], region: 'us', language: 'en' });
   });
 });

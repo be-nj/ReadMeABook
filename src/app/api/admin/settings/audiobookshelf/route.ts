@@ -24,6 +24,7 @@ export async function PUT(request: NextRequest) {
           language?: unknown;
           audience?: unknown;
           region?: unknown;
+          regions?: unknown;
           mediaPath?: unknown;
           isPrimary?: unknown;
         };
@@ -32,35 +33,38 @@ export async function PUT(request: NextRequest) {
           language: string;
           audience: 'kids' | 'teen' | 'adult';
           region: string;
+          regions: string[];
           mediaPath: string;
           isPrimary: boolean;
         }>;
 
-        // A shelf's language is implied by its Audible region (region → language is
-        // 1:1). Derive it when the client didn't send one, so routing never relies
-        // on an empty language field.
-        const { AUDIBLE_REGIONS } = await import('@/lib/types/audible');
-        const languageForRegion = (region: string): string =>
-          (AUDIBLE_REGIONS as Record<string, { language?: string }>)[region]?.language || '';
+        // A shelf searches a set of Audible stores; its home store (regions[0])
+        // implies the routing language (region → language is 1:1). Derive the
+        // language when the client didn't send one, so routing never relies on
+        // an empty language field. `region` stays as a mirror of regions[0].
+        const { normalizeShelfRegions, languageForRegions } = await import('@/lib/utils/shelf-regions');
 
         if (Array.isArray(shelves)) {
           normalizedShelves = (shelves as IncomingShelf[])
             .filter((s) => s && typeof s.libraryId === 'string' && s.libraryId.length > 0)
-            .map((s) => ({
-              libraryId: s.libraryId as string,
-              language:
-                typeof s.language === 'string' && s.language.length > 0
-                  ? s.language
-                  : languageForRegion(typeof s.region === 'string' ? s.region : ''),
-              audience:
-                s.audience === 'kids' || s.audience === 'teen' || s.audience === 'adult'
-                  ? s.audience
-                  : 'adult',
-              // Per-shelf region arrives with multi-region search; default empty for now.
-              region: typeof s.region === 'string' ? s.region : '',
-              mediaPath: typeof s.mediaPath === 'string' ? s.mediaPath : '',
-              isPrimary: s.isPrimary === true,
-            }));
+            .map((s) => {
+              const regions = normalizeShelfRegions(s.regions, s.region);
+              return {
+                libraryId: s.libraryId as string,
+                language:
+                  typeof s.language === 'string' && s.language.length > 0
+                    ? s.language
+                    : languageForRegions(regions),
+                audience:
+                  s.audience === 'kids' || s.audience === 'teen' || s.audience === 'adult'
+                    ? s.audience
+                    : 'adult',
+                region: regions[0] ?? '',
+                regions,
+                mediaPath: typeof s.mediaPath === 'string' ? s.mediaPath : '',
+                isPrimary: s.isPrimary === true,
+              };
+            });
         } else {
           const legacyIds: string[] = Array.isArray(libraryIds)
             ? libraryIds.filter((x: unknown): x is string => typeof x === 'string' && x.length > 0)
@@ -70,6 +74,7 @@ export async function PUT(request: NextRequest) {
             language: '',
             audience: 'adult' as const,
             region: '',
+            regions: [],
             mediaPath: '',
             isPrimary: i === 0,
           }));

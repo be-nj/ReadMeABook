@@ -7,6 +7,7 @@ import { prisma } from '@/lib/db';
 import { getEncryptionService } from './encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AudibleRegion, DEFAULT_AUDIBLE_REGION } from '@/lib/types/audible';
+import { normalizeShelfRegions } from '@/lib/utils/shelf-regions';
 
 const logger = RMABLogger.create('Config');
 
@@ -46,7 +47,10 @@ export interface Shelf {
   libraryId: string;
   language: string;
   audience: ShelfAudience;
+  /** Home store (= regions[0]); kept for readers that predate region sets. */
   region: string;
+  /** Audible stores this shelf searches, home store first. */
+  regions: string[];
   mediaPath: string;
   isPrimary?: boolean;
 }
@@ -286,6 +290,7 @@ export class ConfigurationService {
       language: '',
       audience: 'adult' as ShelfAudience,
       region,
+      regions: [region],
       mediaPath,
       isPrimary: i === 0,
     }));
@@ -298,11 +303,13 @@ export class ConfigurationService {
     if (!libraryId) return null;
     const aud = s.audience;
     const audience: ShelfAudience = aud === 'kids' || aud === 'teen' || aud === 'adult' ? aud : 'adult';
+    const regions = normalizeShelfRegions(s.regions, s.region);
     return {
       libraryId,
       language: typeof s.language === 'string' ? s.language : '',
       audience,
-      region: typeof s.region === 'string' ? s.region : '',
+      region: regions[0] ?? (typeof s.region === 'string' ? s.region : ''),
+      regions,
       mediaPath: typeof s.mediaPath === 'string' ? s.mediaPath : '',
       isPrimary: s.isPrimary === true,
     };

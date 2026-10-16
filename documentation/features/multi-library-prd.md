@@ -45,9 +45,13 @@ to one ABS library and one media output path. The occupied (Language × Audience
 cells form a sparse matrix.
 
 - **Owned** = union of all Shelves (matcher unchanged).
-- **Search** runs in **one** region per query, chosen by a language filter that
-  defaults to the **Primary Shelf**'s language. (BookDate may cover all
-  languages by rotating regions over time.)
+- **Search** is scoped to **one Shelf** per query and fans out over that
+  Shelf's Audible **region set** (`regions`, home store first — e.g. en:
+  `us`+`uk`, de: `de`); defaults to the **Primary Shelf** until the user picks
+  one (ADR-0002 amendment, 2026-10-16). Results carry their `region`.
+  (BookDate may cover all languages by rotating regions over time.)
+- **Region set helpers:** `src/lib/utils/shelf-regions.ts`; shelf list for
+  the UI: `GET /api/shelves` (`src/lib/services/shelf-labels.ts`).
 - **Routing** of a request: auto-*suggest* from `language` (reliable) +
   audience-from-genres (best-guess); always overridable in the request dialog.
   Audience falls back **upward** to the next more-adult tier when its exact tier

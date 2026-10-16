@@ -5,20 +5,54 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
 import { LoadMoreBar } from '@/components/ui/LoadMoreBar';
-import { useSearch, Audiobook } from '@/lib/hooks/useAudiobooks';
+import { useSearch, useShelves, Audiobook } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { SectionToolbar } from '@/components/ui/SectionToolbar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { AUDIBLE_REGIONS } from '@/lib/types/audible';
 
+// Persisted search scope (shelf libraryId) in localStorage, exposed as an
+// external store so the server render ('' = default scope) and the client agree.
+const SCOPE_KEY = 'search.shelf';
+const SCOPE_EVENT = 'search-shelf-change';
+function readStoredShelf(): string {
+  try {
+    return localStorage.getItem(SCOPE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+function writeStoredShelf(next: string) {
+  try {
+    if (next) localStorage.setItem(SCOPE_KEY, next);
+    else localStorage.removeItem(SCOPE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  window.dispatchEvent(new Event(SCOPE_EVENT));
+}
+function subscribeStoredShelf(onChange: () => void) {
+  window.addEventListener(SCOPE_EVENT, onChange);
+  window.addEventListener('storage', onChange);
+  return () => {
+    window.removeEventListener(SCOPE_EVENT, onChange);
+    window.removeEventListener('storage', onChange);
+  };
+}
+
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [region, setRegion] = useState('');
+  // Search scope: a shelf (its Audible stores) — remembered per browser.
+  const shelf = useSyncExternalStore(subscribeStoredShelf, readStoredShelf, () => '');
+  const { shelves } = useShelves();
+  const handleShelfChange = (next: string) => writeStoredShelf(next);
+  // A remembered shelf that no longer exists falls back to the default scope.
+  const effectiveShelf = shelves.some((s) => s.libraryId === shelf) ? shelf : '';
   const { cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable } = usePreferences();
 
   // Debounce search query
@@ -30,7 +64,7 @@ export default function SearchPage() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const { results, totalResults, hasMore, isLoading, isLoadingMore, loadMore } = useSearch(debouncedQuery, region);
+  const { results, totalResults, hasMore, isLoading, isLoadingMore, loadMore } = useSearch(debouncedQuery, { shelf: effectiveShelf });
 
   // Filter out available titles when hideAvailable is enabled
   const filteredResults = useMemo(
@@ -111,25 +145,27 @@ export default function SearchPage() {
           </div>
         </form>
 
-        {/* Search region (multi-region): defaults to the primary shelf's region */}
-        <div className="max-w-3xl mx-auto -mt-4 flex items-center justify-end gap-2 text-sm">
-          <label htmlFor="search-region" className="text-gray-500 dark:text-gray-400">
-            Region
-          </label>
-          <select
-            id="search-region"
-            value={region}
-            onChange={(e) => setRegion(e.target.value)}
-            className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-          >
-            <option value="">Auto (primary shelf)</option>
-            {Object.values(AUDIBLE_REGIONS).map((r) => (
-              <option key={r.code} value={r.code}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Search scope: which shelf's Audible stores to search */}
+        {shelves.length > 1 && (
+          <div className="max-w-3xl mx-auto -mt-4 flex items-center justify-end gap-2 text-sm">
+            <label htmlFor="search-shelf" className="text-gray-500 dark:text-gray-400">
+              Shelf
+            </label>
+            <select
+              id="search-shelf"
+              value={effectiveShelf}
+              onChange={(e) => handleShelfChange(e.target.value)}
+              className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            >
+              <option value="">Default ({shelves.find((s) => s.isPrimary)?.label || shelves[0].label})</option>
+              {shelves.map((s) => (
+                <option key={s.libraryId} value={s.libraryId}>
+                  {s.label} ({s.regions.map((r) => AUDIBLE_REGIONS[r as keyof typeof AUDIBLE_REGIONS]?.name || r).join(', ')})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Results */}
         {debouncedQuery ? (

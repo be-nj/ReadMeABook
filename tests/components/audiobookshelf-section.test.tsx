@@ -68,13 +68,13 @@ describe('AudiobookshelfSection — shelves', () => {
 
   it('renders a row per library and only enabled shelves expand their fields', () => {
     renderSection([
-      { libraryId: 'de-lib', region: 'de', language: 'de', audience: 'adult', mediaPath: '/m/de', isPrimary: true },
+      { libraryId: 'de-lib', region: 'de', regions: ['de'], language: 'de', audience: 'adult', mediaPath: '/m/de', isPrimary: true },
     ]);
 
     // Three library checkboxes, one checked.
     const checkboxes = screen.getAllByRole('checkbox').filter((c) => (c as HTMLInputElement).type === 'checkbox');
-    // 3 library checkboxes + 1 "trigger scan" checkbox
-    expect(checkboxes).toHaveLength(4);
+    // 3 library checkboxes + 8 store checkboxes of the one enabled shelf + 1 "trigger scan" checkbox
+    expect(checkboxes).toHaveLength(12);
 
     // The enabled de-lib row shows its fields; en-lib (disabled) does not.
     const deRow = rowFor('Hörbücher');
@@ -98,24 +98,48 @@ describe('AudiobookshelfSection — shelves', () => {
     expect(shelves[0]).toMatchObject({
       libraryId: 'en-lib',
       region: 'us', // global audibleRegion
-      language: 'en', // derived from region
+      regions: ['us'],
+      language: 'en', // derived from the home store
       audience: 'adult',
       isPrimary: true, // first shelf becomes primary
     });
   });
 
-  it('changing the region derives the routing language', () => {
+  it('adding a store of another language keeps the home store (AUDIBLE_REGIONS order)', () => {
     const { lastShelves } = renderSection([
-      { libraryId: 'de-lib', region: 'us', language: 'en', audience: 'adult', mediaPath: '/m', isPrimary: true },
+      { libraryId: 'de-lib', region: 'us', regions: ['us'], language: 'en', audience: 'adult', mediaPath: '/m', isPrimary: true },
     ]);
 
-    const deRow = rowFor('Hörbücher');
-    const regionSelect = within(deRow).getByDisplayValue('United States') as HTMLSelectElement;
-    fireEvent.change(regionSelect, { target: { value: 'de' } });
-
+    fireEvent.click(within(rowFor('Hörbücher')).getByLabelText('Germany store'));
     const shelf = lastShelves().find((s) => s.libraryId === 'de-lib')!;
+    expect(shelf.regions).toEqual(['us', 'de']);
+    expect(shelf.region).toBe('us');
+    expect(shelf.language).toBe('en');
+  });
+
+  it('removing the home store promotes the next one and derives the routing language', () => {
+    const { lastShelves } = renderSection([
+      { libraryId: 'de-lib', region: 'us', regions: ['us', 'de'], language: 'en', audience: 'adult', mediaPath: '/m', isPrimary: true },
+    ]);
+
+    fireEvent.click(within(rowFor('Hörbücher')).getByLabelText('United States store'));
+    const shelf = lastShelves().find((s) => s.libraryId === 'de-lib')!;
+    expect(shelf.regions).toEqual(['de']);
     expect(shelf.region).toBe('de');
     expect(shelf.language).toBe('de');
+  });
+
+  it('adding a second store of the same language keeps the home store', () => {
+    const { lastShelves } = renderSection([
+      { libraryId: 'en-lib', region: 'us', regions: ['us'], language: 'en', audience: 'adult', mediaPath: '/m', isPrimary: true },
+    ]);
+
+    const enRow = rowFor('Audiobooks');
+    fireEvent.click(within(enRow).getByLabelText('United Kingdom store'));
+    const shelf = lastShelves().find((s) => s.libraryId === 'en-lib')!;
+    expect(shelf.regions).toEqual(['us', 'uk']);
+    expect(shelf.region).toBe('us');
+    expect(shelf.language).toBe('en');
   });
 
   it('editing the media path updates only that shelf', () => {

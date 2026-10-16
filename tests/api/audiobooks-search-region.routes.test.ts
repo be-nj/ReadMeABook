@@ -14,7 +14,7 @@ const audibleServiceMock = vi.hoisted(() => ({
   getRegion: vi.fn(() => 'de'),
 }));
 // Captures the region argument the route passes in.
-const getAudibleServiceMock = vi.hoisted(() => vi.fn(() => audibleServiceMock));
+const getAudibleServiceMock = vi.hoisted(() => vi.fn((_region?: string) => audibleServiceMock));
 const getShelvesMock = vi.hoisted(() => vi.fn());
 const currentUserMock = vi.hoisted(() => vi.fn());
 
@@ -121,5 +121,41 @@ describe('Audiobooks search route — region resolution', () => {
     const response = await callSearch('http://app/api/audiobooks/search?q=test');
     const payload = await response.json();
     expect(payload.results[0].region).toBe('de');
+  });
+
+  it('fans a shelf-scoped search out over the shelf region set and tags each result', async () => {
+    getShelvesMock.mockResolvedValue([
+      { libraryId: 'en-lib', regions: ['us', 'uk'], isPrimary: false },
+      { libraryId: 'de-lib', regions: ['de'], isPrimary: true },
+    ]);
+    const perRegion: Record<string, any> = {
+      us: { query: 'q', results: [{ asin: 'US1', title: 'A' }], totalResults: 1, page: 1, hasMore: false },
+      uk: { query: 'q', results: [{ asin: 'UK1', title: 'B' }], totalResults: 1, page: 1, hasMore: true },
+    };
+    getAudibleServiceMock.mockImplementation((region?: string) => ({
+      search: vi.fn().mockResolvedValue(perRegion[region as string]),
+      getRegion: () => region,
+    }) as any);
+
+    const response = await callSearch('http://app/api/audiobooks/search?q=test&shelf=en-lib');
+    const payload = await response.json();
+
+    expect(getAudibleServiceMock).toHaveBeenCalledWith('us');
+    expect(getAudibleServiceMock).toHaveBeenCalledWith('uk');
+    expect(getAudibleServiceMock).not.toHaveBeenCalledWith('de');
+    expect(payload.results.map((r: any) => [r.asin, r.region])).toEqual([['US1', 'us'], ['UK1', 'uk']]);
+    expect(payload.hasMore).toBe(true);
+    expect(payload.regions).toEqual(['us', 'uk']);
+    expect(payload.shelf).toBe('en-lib');
+  });
+
+  it('ignores an unknown shelf param and uses the primary shelf', async () => {
+    getShelvesMock.mockResolvedValue([
+      { libraryId: 'en-lib', regions: ['us', 'uk'], isPrimary: false },
+      { libraryId: 'de-lib', regions: ['de'], isPrimary: true },
+    ]);
+    await callSearch('http://app/api/audiobooks/search?q=test&shelf=nope');
+    expect(getAudibleServiceMock).toHaveBeenCalledTimes(1);
+    expect(getAudibleServiceMock).toHaveBeenCalledWith('de');
   });
 });

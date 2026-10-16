@@ -65,7 +65,7 @@ src/app/admin/settings/
 ## Sections
 
 1. **Plex** - URL, token (masked), library ID, Audible region, filesystem scan trigger toggle
-2. **Audiobookshelf** - URL, API token (masked), library ID, Audible region, filesystem scan trigger toggle
+2. **Audiobookshelf** - URL, API token (masked), shelves (per enabled library: Audible store set via checkboxes — first enabled store = home store → language; audience; media path; primary radio), global Audible region (fallback), filesystem scan trigger toggle
 3. **Prowlarr** - URL, API key (masked), indexer selection with priority, seeding time, RSS monitoring toggle, **audiobook/ebook categories per indexer**
 4. **Download Client** - Type (qBittorrent, Transmission, SABnzbd), URL, credentials (masked), custom download path (per-client relative sub-path with live preview)
 5. **Paths** - Download + media directories, audiobook organization template, metadata tagging toggle, chapter merging toggle, Plex format coercion toggle

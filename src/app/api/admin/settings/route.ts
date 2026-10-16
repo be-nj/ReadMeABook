@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIBLE_REGIONS } from '@/lib/types/audible';
+import { normalizeShelfRegions } from '@/lib/utils/shelf-regions';
 
 /** Language implied by an Audible region (region → language is 1:1), or ''. */
 function languageForRegion(region: string): string {
@@ -38,6 +39,7 @@ function parseAbsLibraryIds(listRaw: string | null | undefined, legacyId: string
 type LoadedShelf = {
   libraryId: string;
   region: string;
+  regions: string[];
   language: string;
   audience: 'kids' | 'teen' | 'adult';
   mediaPath: string;
@@ -57,10 +59,12 @@ function parseShelves(configMap: Map<string, string | null>): LoadedShelf[] {
         const shelves: LoadedShelf[] = parsed
           .filter((s) => s && typeof s.libraryId === 'string' && s.libraryId.length > 0)
           .map((s) => {
-            const region = typeof s.region === 'string' ? s.region : '';
+            const regions = normalizeShelfRegions(s.regions, s.region);
+            const region = regions[0] ?? (typeof s.region === 'string' ? s.region : '');
             return {
               libraryId: s.libraryId as string,
               region,
+              regions,
               language:
                 typeof s.language === 'string' && s.language.length > 0
                   ? s.language
@@ -91,6 +95,7 @@ function parseShelves(configMap: Map<string, string | null>): LoadedShelf[] {
   return ids.map((libraryId, i) => ({
     libraryId,
     region,
+    regions: normalizeShelfRegions(undefined, region),
     language: '',
     audience: 'adult' as const,
     mediaPath,

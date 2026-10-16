@@ -103,6 +103,8 @@ Configurable Audible region for accurate metadata matching across international 
 - Each Audible region uses different ASINs for the same audiobook.
 - Metadata engines (Audnexus / Audible Agent) in Plex / Audiobookshelf must match RMAB's region.
 
+**Per-shelf region sets (fork):** each Shelf has `regions: AudibleRegion[]` (home store first; `region` mirrors `regions[0]`, language derives from it). Helpers in `src/lib/utils/shelf-regions.ts` (`normalizeShelfRegions`, `shelfRegions`, `languageForRegions`, `allShelfRegions`). Admin UI: store checkboxes per shelf (`AudiobookshelfSection`). `audible.region` remains the global fallback for metadata and new shelves.
+
 **Configuration:**
 - Key: `audible.region` (stored in database)
 - Default: `us`
@@ -113,7 +115,7 @@ Configurable Audible region for accurate metadata matching across international 
 
 **Store-specific ASINs & details resolution (fork):**
 - Same book = different ASIN per store (e.g. one title: `B0…US` us, `B0…UK` uk, `B0…DE` de). An ASIN from a `us` search is unknown to Audnexus `region=de` (404) and the `api.audible.de` catalog returns a stub → details 404.
-- `GET /api/audiobooks/search` tags every result with `region` (the region actually searched: param > primary shelf > global).
+- `GET /api/audiobooks/search?q=&page=[&shelf=<libraryId>|&region=xx]` — scope: explicit `region` (one store) > `shelf` (that Shelf's `regions`, searched in parallel, pages merged home store first) > primary shelf's regions > global. Response adds `regions` (searched) + `shelf`; every result carries its `region`.
 - `src/lib/services/audible-details-resolver.ts` — `resolveAudiobookDetails(asin, preferredRegion?)`: tries preferred → global service → each distinct shelf region (deduped); returns `{audiobook, region, audibleBaseUrl}` or null. `parseAudibleRegion()` narrows untrusted strings.
 - Consumers: `GET /api/audiobooks/[asin]?region=`, `GET /api/audiobooks/[asin]/shelf-route?region=`, `createRequestForUser()` (`CreateRequestInput.region`, sent by `POST /api/requests` body `audiobook.region`).
 - Frontend: `Audiobook.region` → `AudiobookCard` → `AudiobookDetailsModal` prop `region` → `useAudiobookDetails(asin, region)`; the modal forwards `region` on request creation. `useAudiobookDetails` retries errors twice (`errorRetryCount: 2`) instead of caching a miss for 5 min.
